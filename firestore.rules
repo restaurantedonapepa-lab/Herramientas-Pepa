@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: products
+    // Fields: name (str), price (num), category (str), description (str), imageId (str), recipe (list), active (bool)
+    //
+    // Collection: ingredients
+    // Fields: name (str), stock (num), unit (str), minStock (num)
+    //
+    // Collection: sales
+    // Fields: items (list), total (num), paymentMethod (str), timestamp (timestamp), clientName (str), table (str)
+    //
+    // Collection: expenses
+    // Fields: concept (str), category (str), amount (num), timestamp (timestamp)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (request.auth.token.email == "restaurantedonapepa@gmail.com" && request.auth.token.email_verified == true) ||
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        );
+    }
+
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.price is number && data.price >= 0 &&
+             data.category is string &&
+             (data.active == null || data.active is bool);
+    }
+
+    function isValidIngredient(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.stock is number &&
+             data.unit is string;
+    }
+
+    function isValidSale(data) {
+      return data.items is list && data.total is number && data.total >= 0;
+    }
+
+    // Rules
+    
+    match /products/{productId} {
+      allow read: if true; // Catálogo público
+      allow write: if isAdmin() && isValidProduct(request.resource.data);
+    }
+
+    match /ingredients/{ingredientId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidIngredient(request.resource.data);
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidSale(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+  }
+}

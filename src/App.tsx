@@ -1,0 +1,180 @@
+import React, { useState, useEffect } from 'react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth, loginWithGoogle, logout, ensureUserProfile } from './firebase';
+import { CatalogView } from './components/CatalogView';
+import { POSView } from './components/POSView';
+import { InventoryView } from './components/InventoryView';
+import { 
+  LayoutDashboard, 
+  Utensils, 
+  ShoppingCart, 
+  Package, 
+  LogOut, 
+  LogIn,
+  Menu,
+  X,
+  ChevronRight,
+  AlertCircle
+} from 'lucide-react';
+
+type View = 'catalog' | 'pos' | 'inventory' | 'dashboard';
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let message = "Algo salió mal.";
+      try {
+        const errInfo = JSON.parse(this.state.error.message);
+        if (errInfo.error.includes('permissions')) {
+          message = "No tienes permisos suficientes para ver esta sección. Asegúrate de ser administrador.";
+        }
+      } catch (e) {
+        message = this.state.error.message || message;
+      }
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-red-50 p-4">
+          <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center">
+            <AlertCircle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Error de Acceso</h2>
+            <p className="text-gray-600 mb-6">{message}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition"
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [currentView, setCurrentView] = useState<View>('catalog');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        await ensureUserProfile(u);
+      }
+      setAuthReady(true);
+      if (u && currentView === 'catalog') {
+        setCurrentView('pos');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  if (!authReady) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-600"></div>
+      </div>
+    );
+  }
+
+  // Public Catalog View
+  if (currentView === 'catalog') {
+    return (
+      <div className="relative">
+        <CatalogView />
+        <div className="fixed bottom-6 left-6 z-[60]">
+          {!user ? (
+            <button 
+              onClick={loginWithGoogle}
+              className="bg-white text-gray-800 px-4 py-2 rounded-full shadow-xl border border-gray-200 font-bold flex items-center gap-2 hover:bg-gray-50 transition"
+            >
+              <LogIn className="w-4 h-4" /> Acceso Personal
+            </button>
+          ) : (
+            <button 
+              onClick={() => setCurrentView('pos')}
+              className="bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl font-bold flex items-center gap-2 hover:bg-red-700 transition"
+            >
+              <LayoutDashboard className="w-5 h-5" /> Panel de Control
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Internal Views (Admin/Staff)
+  const navItems = [
+    { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600' },
+    { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600' },
+    { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600' },
+  ];
+
+  return (
+    <div className="flex h-screen bg-gray-100">
+      {/* Sidebar Desktop */}
+      <aside className={`bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className={`flex items-center gap-2 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
+            <div className="w-8 h-8 bg-red-600 rounded flex items-center justify-center text-white font-bold">DP</div>
+            <span className="font-bold text-gray-800 whitespace-nowrap">Doña Pepa</span>
+          </div>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg transition mx-auto">
+            {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
+
+        <nav className="flex-1 p-3 space-y-2">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setCurrentView(item.id as View)}
+              className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold ${
+                currentView === item.id 
+                  ? 'bg-gray-100 text-gray-900' 
+                  : 'text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              <item.icon className={`w-6 h-6 flex-shrink-0 ${item.color}`} />
+              <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
+                {item.label}
+              </span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="p-3 border-t">
+          <button 
+            onClick={logout}
+            className="w-full flex items-center gap-3 p-3 rounded-xl text-red-600 hover:bg-red-50 transition font-bold"
+          >
+            <LogOut className="w-6 h-6 flex-shrink-0" />
+            <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
+              Cerrar Sesión
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-hidden flex flex-col">
+        <ErrorBoundary>
+          {currentView === 'pos' && <POSView />}
+          {currentView === 'inventory' && <InventoryView />}
+        </ErrorBoundary>
+      </main>
+    </div>
+  );
+}

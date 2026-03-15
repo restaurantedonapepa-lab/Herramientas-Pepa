@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Producto",
+      "description": "Plato o bebida del catálogo",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Nombre del plato" },
+        "price": { "type": "number", "description": "Precio de venta" },
+        "category": { "type": "string", "description": "Categoría (Entradas, Fuertes, etc.)" },
+        "description": { "type": "string", "description": "Descripción del plato" },
+        "imageId": { "type": "string", "description": "ID de Google Drive de la imagen" },
+        "recipe": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "ingredientId": { "type": "string" },
+              "quantity": { "type": "number" }
+            }
+          },
+          "description": "Lista de insumos y cantidades por plato"
+        },
+        "active": { "type": "boolean", "description": "Si está visible en el catálogo" }
+      },
+      "required": ["name", "price", "category"]
+    },
+    "Ingredient": {
+      "title": "Insumo",
+      "description": "Materia prima para las recetas",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Nombre del insumo" },
+        "stock": { "type": "number", "description": "Cantidad actual en inventario" },
+        "unit": { "type": "string", "description": "Unidad de medida (kg, gr, und, etc.)" },
+        "minStock": { "type": "number", "description": "Stock mínimo para alertas" }
+      },
+      "required": ["name", "stock", "unit"]
+    },
+    "Sale": {
+      "title": "Venta",
+      "description": "Registro de una transacción en el TPV",
+      "type": "object",
+      "properties": {
+        "items": { "type": "array", "items": { "type": "object" } },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "clientName": { "type": "string" },
+        "table": { "type": "string" }
+      },
+      "required": ["items", "total", "timestamp"]
+    },
+    "Expense": {
+      "title": "Gasto",
+      "description": "Registro de egresos",
+      "type": "object",
+      "properties": {
+        "concept": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["concept", "amount", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": { "schema": "Product", "description": "Catálogo de productos" },
+    "/ingredients/{ingredientId}": { "schema": "Ingredient", "description": "Inventario de insumos" },
+    "/sales/{saleId}": { "schema": "Sale", "description": "Historial de ventas" },
+    "/expenses/{expenseId}": { "schema": "Expense", "description": "Registro de gastos" }
+  }
+}
