@@ -6,6 +6,7 @@ import { CatalogView } from './components/CatalogView';
 import { POSView } from './components/POSView';
 import { InventoryView } from './components/InventoryView';
 import { ProductDetailView } from './components/ProductDetailView';
+import { Header } from './components/Header';
 import { CartProvider } from './context/CartContext';
 import { 
   LayoutDashboard, 
@@ -76,27 +77,7 @@ const Navigation: React.FC<{ user: User | null }> = ({ user }) => {
     { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600', path: '/' },
   ];
 
-  if (isPublic && !location.pathname.startsWith('/pos') && !location.pathname.startsWith('/inventory')) {
-    return (
-      <div className="fixed bottom-6 left-6 z-[60]">
-        {!user ? (
-          <button 
-            onClick={loginWithGoogle}
-            className="bg-white text-gray-800 px-4 py-2 rounded-full shadow-xl border border-gray-200 font-bold flex items-center gap-2 hover:bg-gray-50 transition"
-          >
-            <LogIn className="w-4 h-4" /> Acceso Personal
-          </button>
-        ) : (
-          <Link 
-            to="/pos"
-            className="bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl font-bold flex items-center gap-2 hover:bg-red-700 transition"
-          >
-            <LayoutDashboard className="w-5 h-5" /> Panel de Control
-          </Link>
-        )}
-      </div>
-    );
-  }
+  if (isPublic) return null;
 
   return (
     <aside className={`bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
@@ -173,6 +154,7 @@ export default function App() {
         <div className="flex h-screen bg-gray-100 overflow-hidden">
           <Navigation user={user} />
           <main className="flex-1 overflow-y-auto flex flex-col">
+            <Header />
             <ErrorBoundary>
               <Routes>
                 <Route path="/" element={<CatalogView />} />

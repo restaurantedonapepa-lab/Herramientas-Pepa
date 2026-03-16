@@ -21,7 +21,7 @@ function cn(...inputs: ClassValue[]) {
 export const ProductDetailView: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { addToCart } = useCart();
+  const { addToCart, toggleFavorite, isFavorite, triggerFlyAnimation } = useCart();
   const [product, setProduct] = useState<Product | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,40 +146,54 @@ export const ProductDetailView: React.FC = () => {
 
   return (
     <div className="bg-white min-h-screen pb-24">
-      {/* Header Sticky */}
-      <header className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md z-50 border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-full transition">
-            <ArrowLeft className="w-6 h-6 text-gray-800" />
+      <main className="max-w-7xl mx-auto px-4 pt-8">
+        {/* Breadcrumbs / Back Button */}
+        <div className="flex items-center justify-between mb-8">
+          <button 
+            onClick={() => navigate(-1)} 
+            className="flex items-center gap-2 text-gray-400 hover:text-red-600 font-black uppercase tracking-widest text-xs transition"
+          >
+            <ArrowLeft className="w-4 h-4" /> Volver
           </button>
           <div className="flex items-center gap-2">
-            <button onClick={() => handleShare('whatsapp')} className="p-2 hover:bg-green-50 text-green-600 rounded-full transition">
+            <button onClick={() => handleShare('whatsapp')} className="p-3 bg-green-50 text-green-600 rounded-2xl hover:bg-green-100 transition shadow-sm">
               <Send className="w-5 h-5" />
             </button>
-            <button onClick={() => handleShare('facebook')} className="p-2 hover:bg-blue-50 text-blue-600 rounded-full transition">
+            <button onClick={() => handleShare('facebook')} className="p-3 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-100 transition shadow-sm">
               <Facebook className="w-5 h-5" />
             </button>
           </div>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-4 pt-20">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
           {/* Image Section */}
           <motion.div 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="relative rounded-[40px] overflow-hidden aspect-square bg-gray-50 shadow-2xl"
+            className="relative rounded-[40px] overflow-hidden aspect-square bg-gray-50 shadow-2xl group"
           >
             <img 
               src={getDriveImageUrl(product.imageId)} 
               alt={product.name} 
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover transition duration-700 group-hover:scale-110"
               referrerPolicy="no-referrer"
             />
             <div className="absolute top-6 right-6">
-              <button className="p-4 bg-white/90 backdrop-blur-md rounded-full text-gray-400 hover:text-red-600 shadow-xl transition">
-                <Heart className="w-6 h-6" />
+              <button 
+                onClick={(e) => {
+                  toggleFavorite(product);
+                  if (!isFavorite(product.id)) {
+                    triggerFlyAnimation(e, getDriveImageUrl(product.imageId), 'favorites');
+                  }
+                }}
+                className={cn(
+                  "p-4 rounded-full shadow-2xl transition backdrop-blur-md",
+                  isFavorite(product.id) 
+                    ? "bg-red-600 text-white" 
+                    : "bg-white/90 text-gray-400 hover:text-red-600"
+                )}
+              >
+                <Heart className={cn("w-6 h-6", isFavorite(product.id) && "fill-current")} />
               </button>
             </div>
           </motion.div>
@@ -213,7 +227,10 @@ export const ProductDetailView: React.FC = () => {
 
               <div className="pt-8 border-t border-gray-100">
                 <button 
-                  onClick={handleAddToCart}
+                  onClick={(e) => {
+                    handleAddToCart();
+                    triggerFlyAnimation(e, getDriveImageUrl(product.imageId), 'cart');
+                  }}
                   className="w-full py-5 bg-red-600 hover:bg-red-700 text-white font-black text-xl rounded-3xl shadow-2xl shadow-red-200 transition-all flex items-center justify-center gap-3"
                 >
                   <ShoppingCart className="w-6 h-6" />
