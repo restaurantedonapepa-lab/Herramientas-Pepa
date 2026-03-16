@@ -83,7 +83,9 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isUser(userId) || isAdmin();
-      allow write: if isAdmin();
+      allow create: if isUser(userId);
+      allow update: if isUser(userId) || isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /reviews/{reviewId} {

@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, collection, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithCredential } from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer, collection, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import Swal from 'sweetalert2';
 
@@ -97,6 +97,17 @@ export const loginWithGoogle = async () => {
     throw error;
   }
 };
+
+export const loginWithOneTap = async (response: any) => {
+  try {
+    const credential = GoogleAuthProvider.credential(response.credential);
+    return await signInWithCredential(auth, credential);
+  } catch (error: any) {
+    console.error("One Tap Login Error:", error);
+    throw error;
+  }
+};
+
 export const logout = () => signOut(auth);
 
 const DEFAULT_IMG_ID = "1CHcrsjPdVxniofL05haOngroR7ulBV7n";
@@ -110,14 +121,24 @@ export const ensureUserProfile = async (user: any) => {
   if (!user) return;
   const userRef = doc(db, 'users', user.uid);
   try {
-    await setDoc(userRef, {
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName,
-      photoURL: user.photoURL,
-      role: user.email === 'restaurantedonapepa@gmail.com' ? 'admin' : 'user',
-      lastLogin: serverTimestamp()
-    }, { merge: true });
+    const userDoc = await getDoc(userRef);
+    if (!userDoc.exists()) {
+      await setDoc(userRef, {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        role: user.email === 'restaurantedonapepa@gmail.com' ? 'admin' : 'cliente',
+        createdAt: serverTimestamp(),
+        lastLogin: serverTimestamp()
+      });
+    } else {
+      await setDoc(userRef, {
+        lastLogin: serverTimestamp(),
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+      }, { merge: true });
+    }
   } catch (error) {
     console.error("Error ensuring user profile:", error);
   }

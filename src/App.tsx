@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, loginWithGoogle, logout, ensureUserProfile } from './firebase';
+import { useCart } from './context/CartContext';
 import { CatalogView } from './components/CatalogView';
 import { POSView } from './components/POSView';
 import { InventoryView } from './components/InventoryView';
+import { UserManagementView } from './components/UserManagementView';
 import { ProductDetailView } from './components/ProductDetailView';
 import { Header } from './components/Header';
+import { GoogleOneTap } from './components/GoogleOneTap';
 import { CartProvider } from './context/CartContext';
 import { 
   LayoutDashboard, 
@@ -19,7 +22,8 @@ import {
   X,
   ChevronRight,
   AlertCircle,
-  Home
+  Home,
+  Users
 } from 'lucide-react';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
@@ -64,20 +68,23 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-const Navigation: React.FC<{ user: User | null }> = ({ user }) => {
+const Navigation: React.FC<{ user: User | null, userProfile: any }> = ({ user, userProfile }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
-  const isPublic = location.pathname === '/' || location.pathname.startsWith('/catalog') || (!['/pos', '/inventory'].includes(location.pathname) && location.pathname !== '/');
+  const isPublic = location.pathname === '/' || location.pathname.startsWith('/catalog') || (!['/pos', '/inventory', '/users'].includes(location.pathname) && location.pathname !== '/');
 
   const navItems = [
-    { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600', path: '/pos' },
-    { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600', path: '/inventory' },
-    { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600', path: '/' },
+    { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600', path: '/pos', roles: ['admin', 'cajero', 'mesero'] },
+    { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600', path: '/inventory', roles: ['admin', 'cocina'] },
+    { id: 'users', label: 'Usuarios', icon: Users, color: 'text-purple-600', path: '/users', roles: ['admin'] },
+    { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600', path: '/', roles: ['admin', 'mesero', 'cajero', 'cocina', 'cliente'] },
   ];
 
   if (isPublic) return null;
+
+  const filteredItems = navItems.filter(item => item.roles.includes(userProfile?.role || 'cliente'));
 
   return (
     <aside className={`bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
@@ -92,7 +99,7 @@ const Navigation: React.FC<{ user: User | null }> = ({ user }) => {
       </div>
 
       <nav className="flex-1 p-3 space-y-2">
-        {navItems.map(item => (
+        {filteredItems.map(item => (
           <Link
             key={item.id}
             to={item.path}
@@ -151,21 +158,52 @@ export default function App() {
   return (
     <CartProvider>
       <BrowserRouter>
-        <div className="flex h-screen bg-gray-100 overflow-hidden">
-          <Navigation user={user} />
-          <main className="flex-1 overflow-y-auto flex flex-col">
-            <Header />
-            <ErrorBoundary>
-              <Routes>
-                <Route path="/" element={<CatalogView />} />
-                <Route path="/pos" element={<POSView />} />
-                <Route path="/inventory" element={<InventoryView />} />
-                <Route path="/:slug" element={<ProductDetailView />} />
-              </Routes>
-            </ErrorBoundary>
-          </main>
-        </div>
+        <AppContent />
       </BrowserRouter>
     </CartProvider>
+  );
+}
+
+function AppContent() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const { userProfile } = useCart();
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        await ensureUserProfile(u);
+      }
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  if (!authReady) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-100 overflow-hidden">
+      <GoogleOneTap />
+      <Navigation user={user} userProfile={userProfile} />
+      <main className="flex-1 overflow-y-auto flex flex-col">
+        <Header />
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<CatalogView />} />
+            <Route path="/pos" element={<POSView />} />
+            <Route path="/inventory" element={<InventoryView />} />
+            <Route path="/users" element={<UserManagementView />} />
+            <Route path="/:slug" element={<ProductDetailView />} />
+          </Routes>
+        </ErrorBoundary>
+      </main>
+    </div>
   );
 }

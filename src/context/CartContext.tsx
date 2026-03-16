@@ -1,5 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { SaleItem, Product } from '../types';
+import { auth, db } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+
+interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string;
+  role: 'admin' | 'cliente' | 'mesero' | 'cajero' | 'cocina';
+}
 
 interface CartContextType {
   cart: SaleItem[];
@@ -16,6 +26,7 @@ interface CartContextType {
   setSearchTerm: (term: string) => void;
   triggerFlyAnimation: (e: React.MouseEvent | { clientX: number, clientY: number }, imageUrl: string, target: 'cart' | 'favorites') => void;
   animations: FlyingAnimation[];
+  userProfile: UserProfile | null;
 }
 
 export interface FlyingAnimation {
@@ -41,6 +52,23 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [searchTerm, setSearchTerm] = useState('');
   const [animations, setAnimations] = useState<FlyingAnimation[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        const userRef = doc(db, 'users', user.uid);
+        return onSnapshot(userRef, (doc) => {
+          if (doc.exists()) {
+            setUserProfile(doc.data() as UserProfile);
+          }
+        });
+      } else {
+        setUserProfile(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(cart));
@@ -109,7 +137,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CartContext.Provider value={{ 
       cart, favorites, addToCart, removeFromCart, updateQuantity, 
       clearCart, toggleFavorite, isFavorite, total, itemCount,
-      searchTerm, setSearchTerm, triggerFlyAnimation, animations
+      searchTerm, setSearchTerm, triggerFlyAnimation, animations,
+      userProfile
     }}>
       {children}
     </CartContext.Provider>

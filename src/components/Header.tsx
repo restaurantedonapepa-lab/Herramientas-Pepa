@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, Heart, User, LogIn, LogOut, X, Globe, Menu, Search, MessageCircle } from 'lucide-react';
+import { ShoppingCart, Heart, User, LogIn, LogOut, X, Globe, Menu, Search, MessageCircle, Users } from 'lucide-react';
 import { useCart, FlyingAnimation } from '../context/CartContext';
 import { auth, loginWithGoogle, logout } from '../firebase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,7 +37,8 @@ const FlyingImage: React.FC<{ animation: FlyingAnimation }> = ({ animation }) =>
 export const Header: React.FC = () => {
   const { 
     itemCount, favorites, cart, removeFromCart, updateQuantity, 
-    total, toggleFavorite, searchTerm, setSearchTerm, animations 
+    total, toggleFavorite, searchTerm, setSearchTerm, animations,
+    userProfile 
   } = useCart();
   const [showCart, setShowCart] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
@@ -106,7 +107,16 @@ export const Header: React.FC = () => {
                       >
                         <Heart className="w-4 h-4 text-red-600" /> Mis Favoritos
                       </button>
-                      {['restaurantedonapepa@gmail.com'].includes(user.email || '') && (
+                      {userProfile?.role === 'admin' && (
+                        <Link 
+                          to="/users" 
+                          className="w-full flex items-center gap-3 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 transition"
+                          onClick={() => setShowUserMenu(false)}
+                        >
+                          <Users className="w-4 h-4 text-purple-600" /> Gestión Usuarios
+                        </Link>
+                      )}
+                      {['admin', 'mesero', 'cajero', 'cocina'].includes(userProfile?.role || '') && (
                         <Link 
                           to="/pos" 
                           className="w-full flex items-center gap-3 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50 transition"
