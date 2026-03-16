@@ -74,6 +74,13 @@ testConnection();
 export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const logout = () => signOut(auth);
 
+const DEFAULT_IMG_ID = "1CHcrsjPdVxniofL05haOngroR7ulBV7n";
+
+export const getDriveImageUrl = (imageId: string | undefined) => {
+  const id = imageId || DEFAULT_IMG_ID;
+  return `https://lh3.googleusercontent.com/d/${id}=w400-h400-c`;
+};
+
 export const ensureUserProfile = async (user: any) => {
   if (!user) return;
   const userRef = doc(db, 'users', user.uid);

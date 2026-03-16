@@ -62,12 +62,26 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["concept", "amount", "timestamp"]
+    },
+    "Table": {
+      "title": "Mesa",
+      "description": "Estado de una mesa en el restaurante",
+      "type": "object",
+      "properties": {
+        "number": { "type": "integer" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "clientName": { "type": "string" },
+        "status": { "type": "string", "enum": ["free", "busy"] },
+        "lastUpdate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["number", "status"]
     }
   },
   "firestore": {
     "/products/{productId}": { "schema": "Product", "description": "Catálogo de productos" },
     "/ingredients/{ingredientId}": { "schema": "Ingredient", "description": "Inventario de insumos" },
     "/sales/{saleId}": { "schema": "Sale", "description": "Historial de ventas" },
-    "/expenses/{expenseId}": { "schema": "Expense", "description": "Registro de gastos" }
+    "/expenses/{expenseId}": { "schema": "Expense", "description": "Registro de gastos" },
+    "/tables/{tableId}": { "schema": "Table", "description": "Estado de las mesas" }
   }
 }

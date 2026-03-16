@@ -1,228 +1,648 @@
-import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, doc, increment, serverTimestamp } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Product, Ingredient, SaleItem } from '../types';
-import { DriveImage } from './DriveImage';
-import { Search, Trash2, CreditCard, Banknote, QrCode, User, Table as TableIcon, ShoppingCart } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  collection, onSnapshot, addDoc, updateDoc, doc, 
+  increment, serverTimestamp, query, where, getDocs,
+  setDoc, orderBy
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
+import { Product, Ingredient, SaleItem, Table, Sale, Expense } from '../types';
+import { 
+  Search, Trash2, CreditCard, Banknote, QrCode, User, 
+  Table as TableIcon, ShoppingCart, ArrowLeft, Plus, 
+  Minus, MessageSquare, Edit2, Save, X, History, 
+  ChartLine, RefreshCw, CheckCircle2, 
+  LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
+  ResponsiveContainer, PieChart, Pie, Cell 
+} from 'recharts';
+import Swal from 'sweetalert2';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+const TOTAL_TABLES = 40;
+const COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 export const POSView: React.FC = () => {
+  // Data States
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [cart, setCart] = useState<SaleItem[]>([]);
+  const [tables, setTables] = useState<Table[]>([]);
+  
+  // UI States
+  const [activeTableId, setActiveTableId] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [clientName, setClientName] = useState('');
-  const [tableName, setTableName] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('Efectivo');
-  const [processing, setProcessing] = useState(false);
+  const [view, setView] = useState<'tables' | 'menu'>('tables');
+  
+  // Modals
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showReportsModal, setShowReportsModal] = useState(false);
+  const [showExpensesModal, setShowExpensesModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [splitCount, setSplitCount] = useState<number>(1);
+  const [isSplitting, setIsSplitting] = useState(false);
 
+  // Payment States
+  const [selectedItemsForPayment, setSelectedItemsForPayment] = useState<Record<string, number>>({});
+  const [paymentMethod, setPaymentMethod] = useState<'Efectivo' | 'Nequi' | 'Daviplata' | 'Tarjeta' | 'QR' | 'Mixto'>('Efectivo');
+  const [mixedPayments, setMixedPayments] = useState({ method1: 'Efectivo', val1: 0, method2: 'Nequi', val2: 0 });
+  const [receivedAmount, setReceivedAmount] = useState<number>(0);
+
+  // Report States
+  const [reportRange, setReportRange] = useState({ start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+  const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
+  const [historyData, setHistoryData] = useState<Sale[]>([]);
+
+  // Derived States
+  const activeTable = useMemo(() => tables.find(t => t.id === activeTableId), [tables, activeTableId]);
+  const categories = useMemo(() => ['all', ...new Set(products.map(p => p.category))], [products]);
+  const filteredProducts = useMemo(() => {
+    let filtered = products.filter(p => p.active);
+    if (activeCategory !== 'all') {
+      filtered = filtered.filter(p => p.category === activeCategory);
+    }
+    if (searchTerm) {
+      filtered = filtered.filter(p => 
+        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.category.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    return filtered;
+  }, [products, activeCategory, searchTerm]);
+
+  // ... (previous memos)
+
+  const printComanda = () => {
+    if (!activeTable) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const itemsHtml = activeTable.items.map(item => `
+      <tr>
+        <td style="padding: 5px 0;">${item.quantity}x ${item.name}</td>
+        <td style="text-align: right;">$${(item.price * item.quantity).toLocaleString()}</td>
+      </tr>
+      ${item.note ? `<tr><td colspan="2" style="font-size: 12px; color: #666; padding-bottom: 5px;">* ${item.note}</td></tr>` : ''}
+    `).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Comanda - Mesa ${activeTable.number}</title>
+          <style>
+            body { font-family: 'Courier New', Courier, monospace; width: 80mm; padding: 5mm; margin: 0; }
+            h2 { text-align: center; margin: 0 0 10px 0; border-bottom: 1px dashed #000; padding-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            .total { border-top: 1px dashed #000; margin-top: 10px; padding-top: 10px; font-weight: bold; font-size: 18px; }
+            .footer { text-align: center; margin-top: 20px; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <h2>Mesa ${activeTable.number}</h2>
+          <p>Cliente: ${activeTable.clientName || 'Mostrador'}</p>
+          <p>Fecha: ${new Date().toLocaleString()}</p>
+          <table>${itemsHtml}</table>
+          <div class="total">TOTAL: $${orderTotal.toLocaleString()}</div>
+          <div class="footer">Restaurante Doña Pepa<br>¡Gracias por su visita!</div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  // Sync Data
   useEffect(() => {
-    const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'products');
+    // Solo activar listeners si el usuario está autenticado
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (!user) {
+        setProducts([]);
+        setIngredients([]);
+        setTables([]);
+        return;
+      }
+
+      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
+      }, (error) => handleFirestoreError(error, OperationType.GET, 'products'));
+
+      const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
+        setIngredients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ingredient)));
+      }, (error) => handleFirestoreError(error, OperationType.GET, 'ingredients'));
+
+      const unsubTables = onSnapshot(collection(db, 'tables'), (snapshot) => {
+        const tablesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Table));
+        if (tablesData.length === 0) {
+          initializeTables();
+        } else {
+          setTables(tablesData.sort((a, b) => a.number - b.number));
+        }
+      }, (error) => handleFirestoreError(error, OperationType.GET, 'tables'));
+
+      return () => { unsubProducts(); unsubIngredients(); unsubTables(); };
     });
-    const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
-      setIngredients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ingredient)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'ingredients');
-    });
-    return () => { unsubProducts(); unsubIngredients(); };
+
+    return () => unsubscribeAuth();
   }, []);
 
-  const addToCart = (product: Product) => {
-    setCart(prev => {
-      const existing = prev.find(item => item.productId === product.id);
-      if (existing) {
-        return prev.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item);
-      }
-      return [...prev, { productId: product.id, name: product.name, price: product.price, quantity: 1 }];
+  const initializeTables = async () => {
+    for (let i = 1; i <= TOTAL_TABLES; i++) {
+      await setDoc(doc(db, 'tables', `mesa-${i}`), {
+        number: i,
+        items: [],
+        clientName: '',
+        status: 'free',
+        lastUpdate: serverTimestamp()
+      });
+    }
+  };
+
+  const fetchReportData = async () => {
+    const start = new Date(reportRange.start);
+    const end = new Date(reportRange.end + 'T23:59:59');
+    
+    const salesQuery = query(collection(db, 'sales'), where('timestamp', '>=', start), where('timestamp', '<=', end));
+    const expensesQuery = query(collection(db, 'expenses'), where('timestamp', '>=', start), where('timestamp', '<=', end));
+
+    const [salesSnap, expensesSnap] = await Promise.all([getDocs(salesQuery), getDocs(expensesQuery)]);
+
+    setReportData({
+      sales: salesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)),
+      expenses: expensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense))
     });
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(item => item.productId !== productId));
+  const fetchHistoryData = async () => {
+    const q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
+    const snap = await getDocs(q);
+    setHistoryData(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)));
   };
 
-  const updateQuantity = (productId: string, delta: number) => {
-    setCart(prev => prev.map(item => {
-      if (item.productId === productId) {
-        const newQty = Math.max(1, item.quantity + delta);
-        return { ...item, quantity: newQty };
-      }
+  useEffect(() => { if (showReportsModal) fetchReportData(); }, [showReportsModal, reportRange]);
+  useEffect(() => { if (showHistoryModal) fetchHistoryData(); }, [showHistoryModal]);
+
+  const reportStats = useMemo(() => {
+    const totalSales = reportData.sales.reduce((sum, s) => sum + s.total, 0);
+    const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
+    
+    const salesByCategory: Record<string, number> = {};
+    reportData.sales.forEach(sale => {
+      sale.items.forEach(item => {
+        const prod = products.find(p => p.id === item.productId);
+        const cat = prod?.category || 'Otros';
+        salesByCategory[cat] = (salesByCategory[cat] || 0) + (item.price * item.quantity);
+      });
+    });
+
+    const salesByMethod: Record<string, number> = {};
+    reportData.sales.forEach(sale => {
+      const method = sale.paymentMethod.split(':')[0].trim();
+      salesByMethod[method] = (salesByMethod[method] || 0) + sale.total;
+    });
+
+    return {
+      totalSales,
+      totalExpenses,
+      balance: totalSales - totalExpenses,
+      categoryData: Object.entries(salesByCategory).map(([name, value]) => ({ name, value })),
+      methodData: Object.entries(salesByMethod).map(([name, value]) => ({ name, value }))
+    };
+  }, [reportData, products]);
+
+  // Table Actions
+  const openTable = (tableId: string) => {
+    setActiveTableId(tableId);
+    setView('menu');
+    setActiveCategory('all');
+    setSearchTerm('');
+    setSelectedItemsForPayment({});
+  };
+
+  const closeTable = () => {
+    setActiveTableId(null);
+    setView('tables');
+    setSelectedItemsForPayment({});
+  };
+
+  const orderTotal = useMemo(() => {
+    if (!activeTable) return 0;
+    return activeTable.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  }, [activeTable]);
+
+  const partialTotal = useMemo(() => {
+    if (!activeTable) return 0;
+    return Object.entries(selectedItemsForPayment).reduce((sum, [id, qty]) => {
+      const item = activeTable.items.find(i => i.productId === id);
+      return sum + (item ? item.price * qty : 0);
+    }, 0);
+  }, [activeTable, selectedItemsForPayment]);
+
+  const currentTotalToPay = Object.keys(selectedItemsForPayment).length > 0 ? partialTotal : orderTotal;
+
+  const addToOrder = async (product: Product) => {
+    if (!activeTableId || !activeTable) return;
+    const newItems = [...activeTable.items];
+    const existingIndex = newItems.findIndex(item => item.productId === product.id);
+    if (existingIndex >= 0) {
+      newItems[existingIndex].quantity += 1;
+    } else {
+      newItems.push({ productId: product.id, name: product.name, price: product.price, quantity: 1, originalPrice: product.price, note: '' });
+    }
+    await updateDoc(doc(db, 'tables', activeTableId), { items: newItems, status: 'busy', lastUpdate: serverTimestamp() });
+  };
+
+  const updateItemQty = async (productId: string, delta: number) => {
+    if (!activeTableId || !activeTable) return;
+    const newItems = activeTable.items.map(item => {
+      if (item.productId === productId) return { ...item, quantity: Math.max(0, item.quantity + delta) };
       return item;
-    }));
+    }).filter(item => item.quantity > 0);
+    await updateDoc(doc(db, 'tables', activeTableId), { items: newItems, status: newItems.length > 0 ? 'busy' : 'free', lastUpdate: serverTimestamp() });
   };
 
-  const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const updateItemNote = async (productId: string, note: string) => {
+    if (!activeTableId || !activeTable) return;
+    const newItems = activeTable.items.map(item => item.productId === productId ? { ...item, note } : item);
+    await updateDoc(doc(db, 'tables', activeTableId), { items: newItems });
+  };
 
-  const handleSale = async () => {
-    if (cart.length === 0) return;
-    setProcessing(true);
+  const updateItemPrice = async (productId: string, price: number) => {
+    if (!activeTableId || !activeTable) return;
+    const newItems = activeTable.items.map(item => item.productId === productId ? { ...item, price } : item);
+    await updateDoc(doc(db, 'tables', activeTableId), { items: newItems });
+  };
+
+  const toggleItemSelection = (productId: string, maxQty: number) => {
+    setSelectedItemsForPayment(prev => {
+      if (prev[productId]) {
+        const { [productId]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [productId]: maxQty };
+    });
+  };
+
+  const handlePayment = async () => {
+    if (!activeTableId || !activeTable) return;
+    const isPartial = Object.keys(selectedItemsForPayment).length > 0;
+    const itemsToPay = isPartial 
+      ? activeTable.items.filter(i => selectedItemsForPayment[i.productId]).map(i => ({ ...i, quantity: selectedItemsForPayment[i.productId] }))
+      : activeTable.items;
+    const total = itemsToPay.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+
     try {
-      // 1. Register Sale
       await addDoc(collection(db, 'sales'), {
-        items: cart,
+        items: itemsToPay,
         total,
-        paymentMethod,
-        clientName,
-        table: tableName,
+        paymentMethod: paymentMethod === 'Mixto' 
+          ? `${mixedPayments.method1}: ${mixedPayments.val1} | ${mixedPayments.method2}: ${mixedPayments.val2}`
+          : paymentMethod,
+        clientName: activeTable.clientName || 'Mostrador',
+        table: `Mesa ${activeTable.number}`,
         timestamp: serverTimestamp()
       });
 
-      // 2. Deduct Inventory
-      for (const item of cart) {
+      for (const item of itemsToPay) {
         const product = products.find(p => p.id === item.productId);
         if (product?.recipe) {
           for (const recipeItem of product.recipe) {
-            const ingredientRef = doc(db, 'ingredients', recipeItem.ingredientId);
-            await updateDoc(ingredientRef, {
-              stock: increment(-(recipeItem.quantity * item.quantity))
-            });
+            await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { stock: increment(-(recipeItem.quantity * item.quantity)) });
           }
         }
       }
 
-      // 3. Reset
-      setCart([]);
-      setClientName('');
-      setTableName('');
-      console.log('Venta registrada con éxito');
+      if (isPartial) {
+        const remainingItems = activeTable.items.map(item => {
+          if (selectedItemsForPayment[item.productId]) return { ...item, quantity: item.quantity - selectedItemsForPayment[item.productId] };
+          return item;
+        }).filter(item => item.quantity > 0);
+        await updateDoc(doc(db, 'tables', activeTableId), { items: remainingItems, status: remainingItems.length > 0 ? 'busy' : 'free', clientName: remainingItems.length > 0 ? activeTable.clientName : '' });
+      } else {
+        await updateDoc(doc(db, 'tables', activeTableId), { items: [], status: 'free', clientName: '' });
+      }
+
+      setShowPaymentModal(false);
+      setSelectedItemsForPayment({});
+      if (!isPartial || (isPartial && activeTable.items.length === Object.keys(selectedItemsForPayment).length)) closeTable();
+      Swal.fire({ icon: 'success', title: 'Venta Registrada', timer: 1500, showConfirmButton: false });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'sales/ingredients');
-    } finally {
-      setProcessing(false);
+      handleFirestoreError(error, OperationType.WRITE, 'sales');
     }
   };
 
-  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const moveTable = async (targetNumber: number) => {
+    if (!activeTableId || !activeTable) return;
+    const targetTable = tables.find(t => t.number === targetNumber);
+    if (!targetTable) return;
+    if (targetTable.status === 'busy') {
+      const mergedItems = [...targetTable.items];
+      activeTable.items.forEach(item => {
+        const existing = mergedItems.find(i => i.productId === item.productId);
+        if (existing) existing.quantity += item.quantity;
+        else mergedItems.push(item);
+      });
+      await updateDoc(doc(db, 'tables', targetTable.id), { items: mergedItems, clientName: targetTable.clientName || activeTable.clientName, status: 'busy' });
+    } else {
+      await updateDoc(doc(db, 'tables', targetTable.id), { items: activeTable.items, clientName: activeTable.clientName, status: 'busy' });
+    }
+    await updateDoc(doc(db, 'tables', activeTableId), { items: [], status: 'free', clientName: '' });
+    setActiveTableId(targetTable.id);
+  };
 
   return (
-    <div className="flex h-full bg-gray-100 overflow-hidden">
-      {/* Products Selection */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="p-4 bg-white border-b">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input 
-              type="text" 
-              placeholder="Buscar producto..."
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {filteredProducts.map(product => (
-            <button 
-              key={product.id}
-              onClick={() => addToCart(product)}
-              className="bg-white p-2 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition text-left flex flex-col h-full"
-            >
-              <DriveImage imageId={product.imageId} className="w-full aspect-square object-cover rounded-lg mb-2" />
-              <div className="flex-1">
-                <h3 className="font-bold text-sm text-gray-800 line-clamp-2">{product.name}</h3>
-                <p className="text-blue-600 font-bold mt-1">${product.price.toLocaleString()}</p>
+    <div className="flex h-full bg-gray-100 overflow-hidden relative">
+      {/* Left Panel */}
+      <div className="flex-1 flex flex-col min-w-0 border-r relative">
+        <AnimatePresence mode="wait">
+          {view === 'tables' && (
+            <motion.div key="tables" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col p-6 overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><History className="w-5 h-5 text-gray-600" /></button>
+                  <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><ChartLine className="w-5 h-5 text-blue-600" /></button>
+                  <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
+                </div>
               </div>
-            </button>
-          ))}
-        </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {tables.map(table => (
+                  <button key={table.id} onClick={() => openTable(table.id)} className={cn("aspect-square rounded-3xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md hover:-translate-y-1", table.status === 'busy' ? "bg-red-50 border-red-200 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-blue-200")}>
+                    <TableIcon className={cn("w-8 h-8", table.status === 'busy' ? "text-red-600" : "text-gray-200")} />
+                    <span className="font-black text-lg">MESA {table.number}</span>
+                    {table.status === 'busy' && <span className="text-xs font-bold bg-red-600 text-white px-2 py-0.5 rounded-full">${table.items.reduce((s, i) => s + (i.price * i.quantity), 0).toLocaleString()}</span>}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {view === 'menu' && (
+            <motion.div key="menu" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="flex-1 flex flex-col">
+              <div className="p-6 bg-white border-b space-y-4 sticky top-0 z-10">
+                <div className="flex items-center gap-4">
+                  <button onClick={closeTable} className="p-2 bg-gray-50 border rounded-xl hover:bg-gray-100 transition"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input type="text" placeholder="Buscar plato o categoría..." className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-medium" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} autoFocus />
+                  </div>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                  {categories.map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCategory(cat)}
+                      className={cn(
+                        "px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap border-2",
+                        activeCategory === cat 
+                          ? "bg-red-600 border-red-600 text-white shadow-lg shadow-red-200" 
+                          : "bg-white border-gray-100 text-gray-400 hover:border-red-200"
+                      )}
+                    >
+                      {cat === 'all' ? 'Todos' : cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
+                {filteredProducts.map(product => (
+                  <button key={product.id} onClick={() => addToOrder(product)} className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group">
+                    <div className="aspect-square relative overflow-hidden bg-gray-50">
+                      <img src={getDriveImageUrl(product.imageId)} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3"><span className="text-white text-xs font-bold uppercase tracking-widest">Añadir</span></div>
+                    </div>
+                    <div className="p-4 flex-1 flex flex-col">
+                      <h3 className="font-black text-sm text-gray-800 line-clamp-2 leading-tight mb-2">{product.name}</h3>
+                      <p className="text-red-600 font-black text-lg mt-auto">${product.price.toLocaleString()}</p>
+                    </div>
+                  </button>
+                ))}
+                {filteredProducts.length === 0 && (
+                  <div className="col-span-full py-20 text-center text-gray-400">
+                    <Search className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p className="font-black uppercase tracking-widest text-sm">No se encontraron platos</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Ticket / Cart */}
-      <div className="w-96 bg-white border-l shadow-xl flex flex-col">
-        <div className="p-4 border-b bg-gray-50">
-          <h2 className="font-bold text-lg flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-blue-600" />
-            Ticket de Venta
-          </h2>
-        </div>
-
-        <div className="p-4 space-y-3">
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input 
-              type="text" 
-              placeholder="Cliente"
-              className="w-full pl-9 pr-3 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-500 outline-none"
-              value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-            />
+      {/* Right Panel */}
+      <div className="w-[400px] bg-white shadow-2xl flex flex-col z-20">
+        <div className="p-6 border-b bg-gray-50/50">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-red-600" />{activeTable ? `Mesa ${activeTable.number}` : 'Seleccione Mesa'}</h2>
+            <div className="flex gap-1">
+              {activeTable && (
+                <>
+                  <button onClick={printComanda} className="p-2 text-gray-600 hover:bg-gray-100 rounded-xl transition" title="Imprimir Comanda"><Printer className="w-5 h-5" /></button>
+                  <button onClick={async () => {
+                    const { value: target } = await Swal.fire({ title: 'Mover Mesa', input: 'number', inputLabel: 'Número de mesa destino', showCancelButton: true });
+                    if (target) moveTable(Number(target));
+                  }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition" title="Mover Mesa"><RefreshCw className="w-5 h-5" /></button>
+                </>
+              )}
+            </div>
           </div>
           <div className="relative">
-            <TableIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input 
-              type="text" 
-              placeholder="Mesa"
-              className="w-full pl-9 pr-3 py-1.5 text-sm border rounded focus:ring-1 focus:ring-blue-500 outline-none"
-              value={tableName}
-              onChange={(e) => setTableName(e.target.value)}
-            />
+            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input type="text" placeholder="Nombre del Cliente" className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-sm font-bold" value={activeTable?.clientName || ''} onChange={async (e) => { if (activeTableId) await updateDoc(doc(db, 'tables', activeTableId), { clientName: e.target.value }); }} disabled={!activeTable} />
           </div>
         </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {cart.map(item => (
-            <div key={item.productId} className="flex gap-3 items-start border-b pb-3">
-              <div className="flex-1">
-                <h4 className="font-bold text-sm text-gray-800">{item.name}</h4>
-                <p className="text-xs text-gray-500">${item.price.toLocaleString()} c/u</p>
-              </div>
-              <div className="flex flex-col items-end gap-2">
-                <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-2 py-1">
-                  <button onClick={() => updateQuantity(item.productId, -1)} className="text-gray-500 hover:text-red-500 font-bold">-</button>
-                  <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
-                  <button onClick={() => updateQuantity(item.productId, 1)} className="text-gray-500 hover:text-green-500 font-bold">+</button>
+        <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+          {activeTable?.items.map(item => (
+            <div key={item.productId} className="p-4 hover:bg-gray-50 transition group">
+              <div className="flex gap-3 mb-3">
+                <input type="checkbox" checked={!!selectedItemsForPayment[item.productId]} onChange={() => toggleItemSelection(item.productId, item.quantity)} className="w-5 h-5 rounded border-gray-300 text-red-600 focus:ring-red-500 cursor-pointer mt-1" />
+                <div className="flex-1">
+                  <div className="flex justify-between items-start mb-1"><h4 className="font-black text-gray-800 leading-tight">{item.name}</h4><span className="font-black text-gray-900">${(item.price * item.quantity).toLocaleString()}</span></div>
+                  <div className="flex items-center gap-2 text-xs text-gray-400 font-bold uppercase tracking-wider"><span>${item.price.toLocaleString()} c/u</span><button onClick={async () => { const { value: price } = await Swal.fire({ title: 'Editar Precio', input: 'number', inputValue: item.price, showCancelButton: true }); if (price) updateItemPrice(item.productId, Number(price)); }} className="hover:text-blue-600 transition"><Edit2 className="w-3 h-3" /></button></div>
+                  {item.note && <div className="mt-2 text-xs bg-orange-50 text-orange-700 px-2 py-1 rounded-lg font-bold flex items-center gap-1"><MessageSquare className="w-3 h-3" />{item.note}</div>}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm">${(item.price * item.quantity).toLocaleString()}</span>
-                  <button onClick={() => removeFromCart(item.productId)} className="text-gray-400 hover:text-red-500">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+              </div>
+              <div className="flex justify-between items-center pl-8">
+                <div className="flex items-center gap-1">
+                  <button onClick={async () => { const { value: note } = await Swal.fire({ title: 'Nota del Plato', input: 'text', inputValue: item.note || '', showCancelButton: true }); if (note !== undefined) updateItemNote(item.productId, note); }} className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition"><MessageSquare className="w-4 h-4" /></button>
+                  <button onClick={() => updateItemQty(item.productId, -100)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
+                </div>
+                <div className="flex items-center gap-3 bg-white border border-gray-100 rounded-2xl p-1 shadow-sm">
+                  <button onClick={() => updateItemQty(item.productId, -1)} className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition"><Minus className="w-4 h-4" /></button>
+                  <span className="font-black text-gray-800 w-6 text-center">{item.quantity}</span>
+                  <button onClick={() => updateItemQty(item.productId, 1)} className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition"><Plus className="w-4 h-4" /></button>
                 </div>
               </div>
             </div>
           ))}
-          {cart.length === 0 && (
-            <div className="text-center py-20 text-gray-400 italic">Ticket vacío</div>
-          )}
+          {(!activeTable || activeTable.items.length === 0) && <div className="flex-1 flex flex-col items-center justify-center text-gray-300 p-12 text-center"><UtensilsCrossed className="w-16 h-16 mb-4 opacity-20" /><p className="font-black uppercase tracking-widest text-sm opacity-50">Mesa Vacía</p></div>}
         </div>
-
-        <div className="p-4 bg-gray-50 border-t space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { id: 'Efectivo', icon: Banknote },
-              { id: 'Tarjeta', icon: CreditCard },
-              { id: 'QR', icon: QrCode }
-            ].map(method => (
-              <button
-                key={method.id}
-                onClick={() => setPaymentMethod(method.id)}
-                className={`flex items-center justify-center gap-2 py-2 rounded-lg border text-sm font-bold transition ${
-                  paymentMethod === method.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'
-                }`}
-              >
-                <method.icon className="w-4 h-4" />
-                {method.id}
-              </button>
-            ))}
-          </div>
-
+        <div className="p-6 bg-white border-t space-y-6">
           <div className="flex justify-between items-end">
-            <span className="text-sm text-gray-500 font-bold">Total:</span>
-            <span className="text-3xl font-black text-gray-900">${total.toLocaleString()}</span>
+            <div className="flex flex-col"><span className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Total a Pagar</span>{Object.keys(selectedItemsForPayment).length > 0 && <span className="text-xs font-bold text-red-500 uppercase mb-1">Selección Parcial</span>}</div>
+            <span className="text-4xl font-black text-gray-900 tracking-tight">${currentTotalToPay.toLocaleString()}</span>
           </div>
-
-          <button 
-            disabled={cart.length === 0 || processing}
-            onClick={handleSale}
-            className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-bold py-4 rounded-xl text-lg shadow-lg transition flex items-center justify-center gap-2"
-          >
-            {processing ? 'PROCESANDO...' : 'CONFIRMAR VENTA'}
-          </button>
+          <button disabled={!activeTable || activeTable.items.length === 0} onClick={() => { setReceivedAmount(currentTotalToPay); setShowPaymentModal(true); }} className={cn("w-full py-5 rounded-3xl font-black text-xl shadow-xl transition-all flex items-center justify-center gap-3", Object.keys(selectedItemsForPayment).length > 0 ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-100 disabled:text-gray-300 disabled:shadow-none")}>{Object.keys(selectedItemsForPayment).length > 0 ? <><Split className="w-6 h-6" /> COBRAR PARCIAL</> : <><CheckCircle2 className="w-6 h-6" /> COBRAR MESA</>}</button>
         </div>
       </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showPaymentModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl overflow-hidden flex h-[600px]">
+              <div className="w-1/3 bg-gray-900 text-white p-10 flex flex-col">
+                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-gray-500 mb-12">Resumen de Pago</h3>
+                <div className="space-y-8 flex-1">
+                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Total</p><p className="text-4xl font-black">${currentTotalToPay.toLocaleString()}</p></div>
+                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Recibido</p><p className="text-4xl font-black text-blue-400">${receivedAmount.toLocaleString()}</p></div>
+                  <div className="pt-8 border-t border-white/10"><p className="text-xs font-bold text-gray-500 uppercase mb-2">Cambio</p><p className={cn("text-5xl font-black", receivedAmount >= currentTotalToPay ? "text-green-400" : "text-red-400")}>${Math.max(0, receivedAmount - currentTotalToPay).toLocaleString()}</p></div>
+                </div>
+                <div className="bg-white/5 rounded-2xl p-4 text-center"><p className="text-xs font-black uppercase tracking-widest text-gray-400">{paymentMethod}</p></div>
+              </div>
+              <div className="flex-1 p-10 flex flex-col">
+                <div className="flex justify-between items-center mb-8"><h3 className="text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
+                <div className="grid grid-cols-3 gap-3 mb-8">
+                  {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
+                    <button key={m} onClick={() => { setPaymentMethod(m as any); setIsSplitting(false); }} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m && !isSplitting ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
+                  ))}
+                  <button onClick={() => setIsSplitting(true)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", isSplitting ? "bg-orange-50 border-orange-600 text-orange-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}><Split className="w-4 h-4" />Dividir</button>
+                </div>
+                <div className="flex-1">
+                  {isSplitting ? (
+                    <div className="space-y-8 text-center py-10">
+                      <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Dividir cuenta entre</p>
+                      <div className="flex items-center justify-center gap-6">
+                        <button onClick={() => setSplitCount(Math.max(1, splitCount - 1))} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-2xl font-black hover:bg-gray-50">-</button>
+                        <span className="text-6xl font-black text-gray-900">{splitCount}</span>
+                        <button onClick={() => setSplitCount(splitCount + 1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-2xl font-black hover:bg-gray-50">+</button>
+                      </div>
+                      <div className="pt-8 border-t">
+                        <p className="text-xs font-black text-gray-400 uppercase mb-2">Cada persona paga</p>
+                        <p className="text-4xl font-black text-orange-600">${Math.round(currentTotalToPay / splitCount).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  ) : paymentMethod === 'Efectivo' ? (
+                    <div className="grid grid-cols-3 gap-3 h-full">
+                      {[7, 8, 9, 4, 5, 6, 1, 2, 3, 'C', 0, '00'].map(val => (
+                        <button key={val} onClick={() => { if (val === 'C') setReceivedAmount(0); else if (val === '00') setReceivedAmount(prev => Number(prev.toString() + '00')); else setReceivedAmount(prev => Number(prev.toString() + val.toString())); }} className="bg-gray-50 rounded-2xl font-black text-2xl text-gray-800 hover:bg-gray-100 transition">{val}</button>
+                      ))}
+                    </div>
+                  ) : paymentMethod === 'Mixto' ? (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-gray-400 uppercase">Método 1</label>
+                          <select className="w-full p-3 bg-gray-50 border rounded-xl font-bold" value={mixedPayments.method1} onChange={(e) => setMixedPayments(prev => ({ ...prev, method1: e.target.value }))}>
+                            <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option>
+                          </select>
+                          <input type="number" className="w-full p-3 bg-white border-2 border-red-100 rounded-xl font-black text-xl" value={mixedPayments.val1} onChange={(e) => { const v1 = Number(e.target.value); setMixedPayments(prev => ({ ...prev, val1: v1, val2: Math.max(0, currentTotalToPay - v1) })); }} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-black text-gray-400 uppercase">Método 2</label>
+                          <select className="w-full p-3 bg-gray-50 border rounded-xl font-bold" value={mixedPayments.method2} onChange={(e) => setMixedPayments(prev => ({ ...prev, method2: e.target.value }))}>
+                            <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option>
+                          </select>
+                          <input type="number" className="w-full p-3 bg-gray-50 border rounded-xl font-black text-xl text-gray-400" value={mixedPayments.val2} readOnly />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-center text-gray-400"><CheckCircle2 className="w-16 h-16 mb-4 text-green-500" /><p className="font-black uppercase tracking-widest">Monto Asignado</p></div>
+                  )}
+                </div>
+                <button onClick={handlePayment} disabled={receivedAmount < currentTotalToPay && paymentMethod !== 'Mixto'} className="mt-8 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all">CONFIRMAR PAGO</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showReportsModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="p-8 border-b flex justify-between items-center bg-gray-50">
+                <h3 className="text-2xl font-black text-gray-800">Informe Financiero</h3>
+                <div className="flex items-center gap-4">
+                  <input type="date" className="p-2 border rounded-xl font-bold" value={reportRange.start} onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} />
+                  <input type="date" className="p-2 border rounded-xl font-bold" value={reportRange.end} onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} />
+                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8 space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-green-50 p-6 rounded-3xl border border-green-100"><p className="text-xs font-black text-green-600 uppercase mb-2">Ventas Totales</p><p className="text-3xl font-black text-green-800">${reportStats.totalSales.toLocaleString()}</p></div>
+                  <div className="bg-red-50 p-6 rounded-3xl border border-red-100"><p className="text-xs font-black text-red-600 uppercase mb-2">Gastos Totales</p><p className="text-3xl font-black text-red-800">${reportStats.totalExpenses.toLocaleString()}</p></div>
+                  <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100"><p className="text-xs font-black text-blue-600 uppercase mb-2">Balance Neto</p><p className="text-3xl font-black text-blue-800">${reportStats.balance.toLocaleString()}</p></div>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div className="bg-white p-6 rounded-3xl border h-[400px]">
+                    <h4 className="font-black text-gray-800 mb-6 uppercase tracking-widest text-sm">Ventas por Categoría</h4>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={reportStats.categoryData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="value" fill="#ef4444" radius={[4, 4, 0, 0]} /></BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="bg-white p-6 rounded-3xl border h-[400px]">
+                    <h4 className="font-black text-gray-800 mb-6 uppercase tracking-widest text-sm">Métodos de Pago</h4>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart><Pie data={reportStats.methodData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" label>{reportStats.methodData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /></PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showHistoryModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="p-8 border-b flex justify-between items-center bg-gray-50">
+                <h3 className="text-2xl font-black text-gray-800">Historial de Ventas</h3>
+                <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8">
+                <table className="w-full text-left">
+                  <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th></tr></thead>
+                  <tbody className="divide-y">
+                    {historyData.map(sale => (
+                      <tr key={sale.id} className="hover:bg-gray-50 transition">
+                        <td className="py-4 text-sm font-bold">{sale.timestamp?.toDate().toLocaleString()}</td>
+                        <td className="py-4 text-sm font-black">{sale.table}</td>
+                        <td className="py-4 text-sm font-medium">{sale.clientName}</td>
+                        <td className="py-4 text-xs font-black uppercase text-gray-500">{sale.paymentMethod}</td>
+                        <td className="py-4 text-right font-black text-gray-900">${sale.total.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showExpensesModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+              <div className="p-8 border-b flex justify-between items-center">
+                <h3 className="text-2xl font-black text-gray-800">Registrar Gasto</h3>
+                <button onClick={() => setShowExpensesModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
+              </div>
+              <form onSubmit={async (e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); await addDoc(collection(db, 'expenses'), { concept: fd.get('concept'), category: fd.get('category'), amount: Number(fd.get('amount')), timestamp: serverTimestamp() }); setShowExpensesModal(false); Swal.fire({ icon: 'success', title: 'Gasto Registrado', timer: 1500, showConfirmButton: false }); }} className="p-8 space-y-6">
+                <div><label className="block text-xs font-black text-gray-400 uppercase mb-2">Concepto</label><input name="concept" required className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold" /></div>
+                <div><label className="block text-xs font-black text-gray-400 uppercase mb-2">Categoría</label><select name="category" className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold"><option>Insumos</option><option>Servicios</option><option>Nómina</option><option>Varios</option></select></div>
+                <div><label className="block text-xs font-black text-gray-400 uppercase mb-2">Monto</label><input name="amount" type="number" required className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold text-2xl" /></div>
+                <button type="submit" className="w-full py-5 bg-red-600 text-white font-black text-xl rounded-3xl shadow-xl hover:bg-red-700 transition">REGISTRAR</button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

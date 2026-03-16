@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
 import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X } from 'lucide-react';
 
@@ -16,17 +16,27 @@ export const InventoryView: React.FC = () => {
   const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT_KUYEvt5fxkTpwMd38bu7VjuNrjlSwIYQ753QFWLRS93gTlTUuiDvBwJaYSsc8NOn01_yvSGJpkDG/pub?gid=0&single=true&output=csv';
 
   useEffect(() => {
-    const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
-      setIngredients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ingredient)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'ingredients');
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (!user) {
+        setIngredients([]);
+        setProducts([]);
+        return;
+      }
+
+      const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
+        setIngredients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ingredient)));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'ingredients');
+      });
+      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, 'products');
+      });
+      return () => { unsubIngredients(); unsubProducts(); };
     });
-    const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'products');
-    });
-    return () => { unsubIngredients(); unsubProducts(); };
+
+    return () => unsubscribeAuth();
   }, []);
 
   const handleImportFromSheets = async () => {
@@ -250,34 +260,44 @@ export const InventoryView: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {products.map(prod => (
-            <div key={prod.id} className="bg-white p-4 rounded-2xl shadow-sm border hover:shadow-md transition">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="font-bold text-gray-800">{prod.name}</h3>
-                  <p className="text-xs text-gray-500 uppercase font-bold">{prod.category}</p>
-                </div>
-                <div className="flex gap-1">
-                  <button onClick={() => { setEditingItem(prod); setIsModalOpen(true); }} className="text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
-                  <button onClick={() => deleteDoc(doc(db, 'products', prod.id))} className="text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
-                </div>
+            <div key={prod.id} className="bg-white p-4 rounded-2xl shadow-sm border hover:shadow-md transition flex gap-4">
+              <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100 border">
+                <img 
+                  src={getDriveImageUrl(prod.imageId)} 
+                  alt={prod.name}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
               </div>
-              <div className="space-y-2">
-                <p className="text-xs font-bold text-gray-400 uppercase">Receta:</p>
-                {prod.recipe?.length > 0 ? (
-                  <div className="space-y-1">
-                    {prod.recipe.map((item, idx) => {
-                      const ing = ingredients.find(i => i.id === item.ingredientId);
-                      return (
-                        <div key={idx} className="flex justify-between text-xs text-gray-600 bg-gray-50 p-1.5 rounded">
-                          <span>{ing?.name || 'Insumo eliminado'}</span>
-                          <span className="font-bold">{item.quantity} {ing?.unit}</span>
-                        </div>
-                      );
-                    })}
+              <div className="flex-1">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h3 className="font-bold text-gray-800">{prod.name}</h3>
+                    <p className="text-xs text-gray-500 uppercase font-bold">{prod.category}</p>
                   </div>
-                ) : (
-                  <p className="text-xs text-orange-500 italic">Sin receta configurada</p>
-                )}
+                  <div className="flex gap-1">
+                    <button onClick={() => { setEditingItem(prod); setIsModalOpen(true); }} className="text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
+                    <button onClick={() => deleteDoc(doc(db, 'products', prod.id))} className="text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase">Receta:</p>
+                  {prod.recipe?.length > 0 ? (
+                    <div className="space-y-1">
+                      {prod.recipe.map((item, idx) => {
+                        const ing = ingredients.find(i => i.id === item.ingredientId);
+                        return (
+                          <div key={idx} className="flex justify-between text-xs text-gray-600 bg-gray-50 p-1.5 rounded">
+                            <span>{ing?.name || 'Insumo eliminado'}</span>
+                            <span className="font-bold">{item.quantity} {ing?.unit}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-orange-500 italic">Sin receta configurada</p>
+                  )}
+                </div>
               </div>
             </div>
           ))}

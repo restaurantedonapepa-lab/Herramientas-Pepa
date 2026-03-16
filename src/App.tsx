@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, loginWithGoogle, logout, ensureUserProfile } from './firebase';
 import { CatalogView } from './components/CatalogView';
 import { POSView } from './components/POSView';
 import { InventoryView } from './components/InventoryView';
+import { ProductDetailView } from './components/ProductDetailView';
+import { CartProvider } from './context/CartContext';
 import { 
   LayoutDashboard, 
   Utensils, 
@@ -14,10 +17,9 @@ import {
   Menu,
   X,
   ChevronRight,
-  AlertCircle
+  AlertCircle,
+  Home
 } from 'lucide-react';
-
-type View = 'catalog' | 'pos' | 'inventory' | 'dashboard';
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
   constructor(props: any) {
@@ -61,10 +63,89 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
+const Navigation: React.FC<{ user: User | null }> = ({ user }) => {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const isPublic = location.pathname === '/' || location.pathname.startsWith('/catalog') || (!['/pos', '/inventory'].includes(location.pathname) && location.pathname !== '/');
+
+  const navItems = [
+    { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600', path: '/pos' },
+    { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600', path: '/inventory' },
+    { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600', path: '/' },
+  ];
+
+  if (isPublic && !location.pathname.startsWith('/pos') && !location.pathname.startsWith('/inventory')) {
+    return (
+      <div className="fixed bottom-6 left-6 z-[60]">
+        {!user ? (
+          <button 
+            onClick={loginWithGoogle}
+            className="bg-white text-gray-800 px-4 py-2 rounded-full shadow-xl border border-gray-200 font-bold flex items-center gap-2 hover:bg-gray-50 transition"
+          >
+            <LogIn className="w-4 h-4" /> Acceso Personal
+          </button>
+        ) : (
+          <Link 
+            to="/pos"
+            className="bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl font-bold flex items-center gap-2 hover:bg-red-700 transition"
+          >
+            <LayoutDashboard className="w-5 h-5" /> Panel de Control
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <aside className={`bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
+      <div className="p-4 border-b flex items-center justify-between">
+        <div className={`flex items-center gap-2 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
+          <div className="w-8 h-8 bg-red-600 rounded flex items-center justify-center text-white font-bold">DP</div>
+          <span className="font-bold text-gray-800 whitespace-nowrap">Doña Pepa</span>
+        </div>
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg transition mx-auto">
+          {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+      </div>
+
+      <nav className="flex-1 p-3 space-y-2">
+        {navItems.map(item => (
+          <Link
+            key={item.id}
+            to={item.path}
+            className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold ${
+              location.pathname === item.path 
+                ? 'bg-gray-100 text-gray-900' 
+                : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            <item.icon className={`w-6 h-6 flex-shrink-0 ${item.color}`} />
+            <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
+              {item.label}
+            </span>
+          </Link>
+        ))}
+      </nav>
+
+      <div className="p-3 border-t">
+        <button 
+          onClick={logout}
+          className="w-full flex items-center gap-3 p-3 rounded-xl text-red-600 hover:bg-red-50 transition font-bold"
+        >
+          <LogOut className="w-6 h-6 flex-shrink-0" />
+          <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
+            Cerrar Sesión
+          </span>
+        </button>
+      </div>
+    </aside>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [currentView, setCurrentView] = useState<View>('catalog');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
@@ -74,9 +155,6 @@ export default function App() {
         await ensureUserProfile(u);
       }
       setAuthReady(true);
-      if (u && currentView === 'catalog') {
-        setCurrentView('pos');
-      }
     });
     return () => unsubscribe();
   }, []);
@@ -89,92 +167,23 @@ export default function App() {
     );
   }
 
-  // Public Catalog View
-  if (currentView === 'catalog') {
-    return (
-      <div className="relative">
-        <CatalogView />
-        <div className="fixed bottom-6 left-6 z-[60]">
-          {!user ? (
-            <button 
-              onClick={loginWithGoogle}
-              className="bg-white text-gray-800 px-4 py-2 rounded-full shadow-xl border border-gray-200 font-bold flex items-center gap-2 hover:bg-gray-50 transition"
-            >
-              <LogIn className="w-4 h-4" /> Acceso Personal
-            </button>
-          ) : (
-            <button 
-              onClick={() => setCurrentView('pos')}
-              className="bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl font-bold flex items-center gap-2 hover:bg-red-700 transition"
-            >
-              <LayoutDashboard className="w-5 h-5" /> Panel de Control
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Internal Views (Admin/Staff)
-  const navItems = [
-    { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600' },
-    { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600' },
-    { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600' },
-  ];
-
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* Sidebar Desktop */}
-      <aside className={`bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
-        <div className="p-4 border-b flex items-center justify-between">
-          <div className={`flex items-center gap-2 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
-            <div className="w-8 h-8 bg-red-600 rounded flex items-center justify-center text-white font-bold">DP</div>
-            <span className="font-bold text-gray-800 whitespace-nowrap">Doña Pepa</span>
-          </div>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg transition mx-auto">
-            {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </button>
+    <CartProvider>
+      <BrowserRouter>
+        <div className="flex h-screen bg-gray-100 overflow-hidden">
+          <Navigation user={user} />
+          <main className="flex-1 overflow-hidden flex flex-col">
+            <ErrorBoundary>
+              <Routes>
+                <Route path="/" element={<CatalogView />} />
+                <Route path="/pos" element={<POSView />} />
+                <Route path="/inventory" element={<InventoryView />} />
+                <Route path="/:slug" element={<ProductDetailView />} />
+              </Routes>
+            </ErrorBoundary>
+          </main>
         </div>
-
-        <nav className="flex-1 p-3 space-y-2">
-          {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setCurrentView(item.id as View)}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold ${
-                currentView === item.id 
-                  ? 'bg-gray-100 text-gray-900' 
-                  : 'text-gray-500 hover:bg-gray-50'
-              }`}
-            >
-              <item.icon className={`w-6 h-6 flex-shrink-0 ${item.color}`} />
-              <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
-                {item.label}
-              </span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-3 border-t">
-          <button 
-            onClick={logout}
-            className="w-full flex items-center gap-3 p-3 rounded-xl text-red-600 hover:bg-red-50 transition font-bold"
-          >
-            <LogOut className="w-6 h-6 flex-shrink-0" />
-            <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
-              Cerrar Sesión
-            </span>
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-hidden flex flex-col">
-        <ErrorBoundary>
-          {currentView === 'pos' && <POSView />}
-          {currentView === 'inventory' && <InventoryView />}
-        </ErrorBoundary>
-      </main>
-    </div>
+      </BrowserRouter>
+    </CartProvider>
   );
 }

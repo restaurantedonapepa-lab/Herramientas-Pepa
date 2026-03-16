@@ -1,12 +1,22 @@
 export interface Product {
   id: string;
   name: string;
+  slug?: string;
   price: number;
   category: string;
   description: string;
   imageId: string;
   recipe: RecipeItem[];
   active: boolean;
+}
+
+export interface Review {
+  id: string;
+  productId: string;
+  userName: string;
+  rating: number;
+  comment: string;
+  timestamp: any;
 }
 
 export interface RecipeItem {
@@ -37,6 +47,17 @@ export interface SaleItem {
   name: string;
   price: number;
   quantity: number;
+  originalPrice?: number;
+  note?: string;
+}
+
+export interface Table {
+  id: string;
+  number: number;
+  items: SaleItem[];
+  clientName: string;
+  status: 'free' | 'busy';
+  lastUpdate: any;
 }
 
 export interface Expense {
