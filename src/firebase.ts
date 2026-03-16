@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, collection, setDoc, serverTimestamp } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import Swal from 'sweetalert2';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -71,7 +72,31 @@ async function testConnection() {
 }
 testConnection();
 
-export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const loginWithGoogle = async () => {
+  try {
+    return await signInWithPopup(auth, googleProvider);
+  } catch (error: any) {
+    console.error("Login Error:", error);
+    if (error.code === 'auth/cancelled-by-user') return;
+    
+    let message = "No se pudo iniciar sesión.";
+    if (error.code === 'auth/unauthorized-domain') {
+      message = `El dominio ${window.location.hostname} no está autorizado. \n\nAsegúrate de añadir "herramientas-pepa.vercel.app" en la consola de Firebase > Authentication > Settings > Authorized Domains.`;
+    } else if (error.code === 'auth/popup-blocked') {
+      message = "Ventana emergente bloqueada por el navegador.";
+    } else {
+      message = `Error: ${error.message}`;
+    }
+
+    Swal.fire({
+      icon: 'error',
+      title: 'Error de Login',
+      text: message,
+      confirmButtonColor: '#dc2626'
+    });
+    throw error;
+  }
+};
 export const logout = () => signOut(auth);
 
 const DEFAULT_IMG_ID = "1CHcrsjPdVxniofL05haOngroR7ulBV7n";
