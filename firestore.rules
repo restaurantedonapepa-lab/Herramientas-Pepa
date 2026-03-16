@@ -91,5 +91,11 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update, delete: if isAdmin();
     }
+
+    match /web_orders/{orderId} {
+      allow read: if isAdmin();
+      allow create: if true; // Permitir pedidos de clientes no autenticados
+      allow update, delete: if isAdmin();
+    }
   }
 }

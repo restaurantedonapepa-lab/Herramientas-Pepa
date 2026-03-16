@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
-import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search } from 'lucide-react';
 
 export const InventoryView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ingredients' | 'products'>('ingredients');
@@ -12,31 +12,44 @@ export const InventoryView: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [showIngredientList, setShowIngredientList] = useState(false);
+  const [inventorySearch, setInventorySearch] = useState('');
+
+  const filteredIngredients = ingredients.filter(i => i.name.toLowerCase().includes(inventorySearch.toLowerCase()));
+  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(inventorySearch.toLowerCase()) || p.category.toLowerCase().includes(inventorySearch.toLowerCase()));
 
   const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT_KUYEvt5fxkTpwMd38bu7VjuNrjlSwIYQ753QFWLRS93gTlTUuiDvBwJaYSsc8NOn01_yvSGJpkDG/pub?gid=0&single=true&output=csv';
 
   useEffect(() => {
+    let unsubIngredients: (() => void) | undefined;
+    let unsubProducts: (() => void) | undefined;
+
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (unsubIngredients) unsubIngredients();
+      if (unsubProducts) unsubProducts();
+
       if (!user) {
         setIngredients([]);
         setProducts([]);
         return;
       }
 
-      const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
+      unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
         setIngredients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ingredient)));
       }, (error) => {
         handleFirestoreError(error, OperationType.GET, 'ingredients');
       });
-      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+      unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
         setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
       }, (error) => {
         handleFirestoreError(error, OperationType.GET, 'products');
       });
-      return () => { unsubIngredients(); unsubProducts(); };
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubIngredients) unsubIngredients();
+      if (unsubProducts) unsubProducts();
+    };
   }, []);
 
   const handleImportFromSheets = async () => {
@@ -190,7 +203,7 @@ export const InventoryView: React.FC = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div className="flex bg-white rounded-xl p-1 shadow-sm border">
           <button 
             onClick={() => setActiveTab('ingredients')}
@@ -204,6 +217,17 @@ export const InventoryView: React.FC = () => {
           >
             <UtensilsCrossed className="w-4 h-4" /> Platos (Recetas)
           </button>
+        </div>
+
+        <div className="flex flex-1 max-w-md relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <input 
+            type="text" 
+            placeholder="Buscar en el inventario..."
+            className="w-full pl-12 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none font-medium shadow-sm"
+            value={inventorySearch}
+            onChange={(e) => setInventorySearch(e.target.value)}
+          />
         </div>
 
         <div className="flex gap-2">
@@ -236,7 +260,7 @@ export const InventoryView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {ingredients.map(ing => (
+              {filteredIngredients.map(ing => (
                 <tr key={ing.id} className="hover:bg-gray-50 transition">
                   <td className="px-6 py-4 font-medium text-gray-800">{ing.name}</td>
                   <td className="px-6 py-4 font-bold">{ing.stock}</td>
@@ -259,7 +283,7 @@ export const InventoryView: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {products.map(prod => (
+          {filteredProducts.map(prod => (
             <div key={prod.id} className="bg-white p-4 rounded-2xl shadow-sm border hover:shadow-md transition flex gap-4">
               <div className="w-20 h-20 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100 border">
                 <img 

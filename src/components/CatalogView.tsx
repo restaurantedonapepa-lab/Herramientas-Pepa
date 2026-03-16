@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl } from '../firebase';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { 
   Search, ShoppingCart, Heart, Info, X, 
-  Plus, Minus, Trash2, ArrowRight, Star
+  Plus, Minus, Trash2, ArrowRight, Star, Globe
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { clsx, type ClassValue } from 'clsx';
@@ -22,7 +23,9 @@ export const CatalogView: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCart, setShowCart] = useState(false);
-  const { cart, addToCart, removeFromCart, updateQuantity, total, itemCount } = useCart();
+  const [showCheckoutForm, setShowCheckoutForm] = useState(false);
+  const [clientInfo, setClientInfo] = useState({ name: '', phone: '', address: '', notes: '' });
+  const { cart, addToCart, removeFromCart, updateQuantity, total, itemCount, clearCart } = useCart();
 
   useEffect(() => {
     const q = query(collection(db, 'products'), where('active', '==', true));
@@ -36,6 +39,37 @@ export const CatalogView: React.FC = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleCheckout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cart.length === 0) return;
+    
+    setLoading(true);
+    try {
+      await addDoc(collection(db, 'web_orders'), {
+        items: cart,
+        total,
+        clientInfo,
+        status: 'pending',
+        timestamp: serverTimestamp(),
+        source: 'web_catalog'
+      });
+      
+      clearCart();
+      setShowCheckoutForm(false);
+      setShowCart(false);
+      Swal.fire({
+        icon: 'success',
+        title: '¡Pedido Enviado!',
+        text: 'Hemos recibido tu pedido. Nos pondremos en contacto contigo pronto.',
+        confirmButtonColor: '#ef4444'
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'web_orders');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const categories = useMemo(() => ['Todos', ...new Set(products.map(p => p.category))], [products]);
 
@@ -277,6 +311,7 @@ export const CatalogView: React.FC = () => {
                 </div>
                 <button 
                   disabled={cart.length === 0}
+                  onClick={() => setShowCheckoutForm(true)}
                   className="w-full py-5 bg-red-600 hover:bg-red-700 text-white font-black text-xl rounded-3xl shadow-xl shadow-red-900/10 transition-all disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none"
                 >
                   FINALIZAR PEDIDO
@@ -284,6 +319,70 @@ export const CatalogView: React.FC = () => {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Checkout Modal */}
+      <AnimatePresence>
+        {showCheckoutForm && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white rounded-[40px] shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-8 border-b flex justify-between items-center">
+                <h3 className="text-2xl font-black text-gray-900">Tus Datos</h3>
+                <button onClick={() => setShowCheckoutForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+                  <X className="w-6 h-6 text-gray-400" />
+                </button>
+              </div>
+              <form onSubmit={handleCheckout} className="p-8 space-y-6">
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2">Nombre Completo</label>
+                  <input 
+                    required
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold"
+                    value={clientInfo.name}
+                    onChange={(e) => setClientInfo(p => ({ ...p, name: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2">Teléfono / WhatsApp</label>
+                  <input 
+                    required
+                    type="tel"
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold"
+                    value={clientInfo.phone}
+                    onChange={(e) => setClientInfo(p => ({ ...p, phone: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2">Dirección (Si es domicilio)</label>
+                  <input 
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold"
+                    value={clientInfo.address}
+                    onChange={(e) => setClientInfo(p => ({ ...p, address: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2">Notas adicionales</label>
+                  <textarea 
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold min-h-[100px]"
+                    value={clientInfo.notes}
+                    onChange={(e) => setClientInfo(p => ({ ...p, notes: e.target.value }))}
+                  />
+                </div>
+                <button 
+                  type="submit"
+                  className="w-full py-5 bg-red-600 text-white font-black text-xl rounded-3xl shadow-xl hover:bg-red-700 transition"
+                >
+                  ENVIAR PEDIDO
+                </button>
+              </form>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -11,7 +11,7 @@ import {
   Table as TableIcon, ShoppingCart, ArrowLeft, Plus, 
   Minus, MessageSquare, Edit2, Save, X, History, 
   ChartLine, RefreshCw, CheckCircle2, 
-  LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer
+  LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -46,6 +46,8 @@ export const POSView: React.FC = () => {
   const [showReportsModal, setShowReportsModal] = useState(false);
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showWebOrdersModal, setShowWebOrdersModal] = useState(false);
+  const [webOrders, setWebOrders] = useState<any[]>([]);
   const [splitCount, setSplitCount] = useState<number>(1);
   const [isSplitting, setIsSplitting] = useState(false);
 
@@ -79,7 +81,7 @@ export const POSView: React.FC = () => {
 
   // ... (previous memos)
 
-  const printComanda = () => {
+  const printComanda = (type: 'customer' | 'kitchen' = 'customer') => {
     if (!activeTable) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
@@ -87,7 +89,7 @@ export const POSView: React.FC = () => {
     const itemsHtml = activeTable.items.map(item => `
       <tr>
         <td style="padding: 5px 0;">${item.quantity}x ${item.name}</td>
-        <td style="text-align: right;">$${(item.price * item.quantity).toLocaleString()}</td>
+        ${type === 'customer' ? `<td style="text-align: right;">$${(item.price * item.quantity).toLocaleString()}</td>` : ''}
       </tr>
       ${item.note ? `<tr><td colspan="2" style="font-size: 12px; color: #666; padding-bottom: 5px;">* ${item.note}</td></tr>` : ''}
     `).join('');
@@ -95,21 +97,25 @@ export const POSView: React.FC = () => {
     printWindow.document.write(`
       <html>
         <head>
-          <title>Comanda - Mesa ${activeTable.number}</title>
+          <title>${type === 'customer' ? 'Cuenta' : 'Comanda'} - Mesa ${activeTable.number}</title>
           <style>
             body { font-family: 'Courier New', Courier, monospace; width: 80mm; padding: 5mm; margin: 0; }
             h2 { text-align: center; margin: 0 0 10px 0; border-bottom: 1px dashed #000; padding-bottom: 10px; }
             table { width: 100%; border-collapse: collapse; }
             .total { border-top: 1px dashed #000; margin-top: 10px; padding-top: 10px; font-weight: bold; font-size: 18px; }
             .footer { text-align: center; margin-top: 20px; font-size: 12px; }
+            .header-info { margin-bottom: 10px; font-size: 14px; }
           </style>
         </head>
         <body>
-          <h2>Mesa ${activeTable.number}</h2>
-          <p>Cliente: ${activeTable.clientName || 'Mostrador'}</p>
-          <p>Fecha: ${new Date().toLocaleString()}</p>
+          <h2>${type === 'customer' ? 'CUENTA' : 'COMANDA COCINA'}</h2>
+          <div class="header-info">
+            <p><strong>Mesa: ${activeTable.number}</strong></p>
+            <p>Cliente: ${activeTable.clientName || 'Mostrador'}</p>
+            <p>Fecha: ${new Date().toLocaleString()}</p>
+          </div>
           <table>${itemsHtml}</table>
-          <div class="total">TOTAL: $${orderTotal.toLocaleString()}</div>
+          ${type === 'customer' ? `<div class="total">TOTAL: $${orderTotal.toLocaleString()}</div>` : ''}
           <div class="footer">Restaurante Doña Pepa<br>¡Gracias por su visita!</div>
         </body>
       </html>
@@ -120,24 +126,35 @@ export const POSView: React.FC = () => {
 
   // Sync Data
   useEffect(() => {
-    // Solo activar listeners si el usuario está autenticado
+    let unsubProducts: (() => void) | undefined;
+    let unsubIngredients: (() => void) | undefined;
+    let unsubTables: (() => void) | undefined;
+    let unsubWebOrders: (() => void) | undefined;
+
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      // Limpiar listeners anteriores si existen
+      if (unsubProducts) unsubProducts();
+      if (unsubIngredients) unsubIngredients();
+      if (unsubTables) unsubTables();
+      if (unsubWebOrders) unsubWebOrders();
+
       if (!user) {
         setProducts([]);
         setIngredients([]);
         setTables([]);
+        setWebOrders([]);
         return;
       }
 
-      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+      unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
         setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
       }, (error) => handleFirestoreError(error, OperationType.GET, 'products'));
 
-      const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
+      unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
         setIngredients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ingredient)));
       }, (error) => handleFirestoreError(error, OperationType.GET, 'ingredients'));
 
-      const unsubTables = onSnapshot(collection(db, 'tables'), (snapshot) => {
+      unsubTables = onSnapshot(collection(db, 'tables'), (snapshot) => {
         const tablesData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Table));
         if (tablesData.length === 0) {
           initializeTables();
@@ -146,10 +163,29 @@ export const POSView: React.FC = () => {
         }
       }, (error) => handleFirestoreError(error, OperationType.GET, 'tables'));
 
-      return () => { unsubProducts(); unsubIngredients(); unsubTables(); };
+      unsubWebOrders = onSnapshot(query(collection(db, 'web_orders'), where('status', '==', 'pending')), (snapshot) => {
+        const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setWebOrders(orders);
+        if (snapshot.docChanges().some(change => change.type === 'added')) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'info',
+            title: '¡Nuevo Pedido Web!',
+            showConfirmButton: false,
+            timer: 3000
+          });
+        }
+      }, (err) => handleFirestoreError(err, OperationType.GET, 'web_orders'));
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubProducts) unsubProducts();
+      if (unsubIngredients) unsubIngredients();
+      if (unsubTables) unsubTables();
+      if (unsubWebOrders) unsubWebOrders();
+    };
   }, []);
 
   const initializeTables = async () => {
@@ -165,24 +201,32 @@ export const POSView: React.FC = () => {
   };
 
   const fetchReportData = async () => {
-    const start = new Date(reportRange.start);
-    const end = new Date(reportRange.end + 'T23:59:59');
-    
-    const salesQuery = query(collection(db, 'sales'), where('timestamp', '>=', start), where('timestamp', '<=', end));
-    const expensesQuery = query(collection(db, 'expenses'), where('timestamp', '>=', start), where('timestamp', '<=', end));
+    try {
+      const start = new Date(reportRange.start);
+      const end = new Date(reportRange.end + 'T23:59:59');
+      
+      const salesQuery = query(collection(db, 'sales'), where('timestamp', '>=', start), where('timestamp', '<=', end));
+      const expensesQuery = query(collection(db, 'expenses'), where('timestamp', '>=', start), where('timestamp', '<=', end));
 
-    const [salesSnap, expensesSnap] = await Promise.all([getDocs(salesQuery), getDocs(expensesQuery)]);
+      const [salesSnap, expensesSnap] = await Promise.all([getDocs(salesQuery), getDocs(expensesQuery)]);
 
-    setReportData({
-      sales: salesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)),
-      expenses: expensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense))
-    });
+      setReportData({
+        sales: salesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)),
+        expenses: expensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense))
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'reports');
+    }
   };
 
   const fetchHistoryData = async () => {
-    const q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
-    const snap = await getDocs(q);
-    setHistoryData(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)));
+    try {
+      const q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
+      const snap = await getDocs(q);
+      setHistoryData(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, 'sales');
+    }
   };
 
   useEffect(() => { if (showReportsModal) fetchReportData(); }, [showReportsModal, reportRange]);
@@ -369,6 +413,14 @@ export const POSView: React.FC = () => {
                   <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><History className="w-5 h-5 text-gray-600" /></button>
                   <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><ChartLine className="w-5 h-5 text-blue-600" /></button>
                   <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
+                  <button onClick={() => setShowWebOrdersModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm relative">
+                    <Globe className="w-5 h-5 text-orange-600" />
+                    {webOrders.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-[8px] flex items-center justify-center rounded-full border-2 border-white animate-bounce">
+                        {webOrders.length}
+                      </span>
+                    )}
+                  </button>
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -443,7 +495,8 @@ export const POSView: React.FC = () => {
             <div className="flex gap-1">
               {activeTable && (
                 <>
-                  <button onClick={printComanda} className="p-2 text-gray-600 hover:bg-gray-100 rounded-xl transition" title="Imprimir Comanda"><Printer className="w-5 h-5" /></button>
+                  <button onClick={() => printComanda('kitchen')} className="p-2 text-orange-600 hover:bg-orange-50 rounded-xl transition" title="Comanda Cocina"><UtensilsCrossed className="w-5 h-5" /></button>
+                  <button onClick={() => printComanda('customer')} className="p-2 text-gray-600 hover:bg-gray-100 rounded-xl transition" title="Imprimir Cuenta"><Printer className="w-5 h-5" /></button>
                   <button onClick={async () => {
                     const { value: target } = await Swal.fire({ title: 'Mover Mesa', input: 'number', inputLabel: 'Número de mesa destino', showCancelButton: true });
                     if (target) moveTable(Number(target));
@@ -525,7 +578,17 @@ export const POSView: React.FC = () => {
                       </div>
                       <div className="pt-8 border-t">
                         <p className="text-xs font-black text-gray-400 uppercase mb-2">Cada persona paga</p>
-                        <p className="text-4xl font-black text-orange-600">${Math.round(currentTotalToPay / splitCount).toLocaleString()}</p>
+                        <p className="text-4xl font-black text-orange-600 mb-6">${Math.round(currentTotalToPay / splitCount).toLocaleString()}</p>
+                        <button 
+                          onClick={() => {
+                            setReceivedAmount(Math.round(currentTotalToPay / splitCount));
+                            setIsSplitting(false);
+                            setPaymentMethod('Efectivo');
+                          }}
+                          className="w-full py-3 bg-orange-100 text-orange-700 font-black rounded-xl hover:bg-orange-200 transition"
+                        >
+                          PAGAR UNA PARTE
+                        </button>
                       </div>
                     </div>
                   ) : paymentMethod === 'Efectivo' ? (
@@ -640,6 +703,93 @@ export const POSView: React.FC = () => {
                 <button type="submit" className="w-full py-5 bg-red-600 text-white font-black text-xl rounded-3xl shadow-xl hover:bg-red-700 transition">REGISTRAR</button>
               </form>
             </motion.div>
+          </div>
+        )}
+
+        {showWebOrdersModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[150] flex items-center justify-center p-4">
+            <div className="bg-gray-50 rounded-[40px] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="p-8 bg-white border-b flex justify-between items-center">
+                <div>
+                  <h2 className="text-3xl font-black text-gray-900">Pedidos Web Pendientes</h2>
+                  <p className="text-gray-400 font-bold">Gestiona los pedidos recibidos desde el catálogo</p>
+                </div>
+                <button onClick={() => setShowWebOrdersModal(false)} className="p-3 hover:bg-gray-100 rounded-full transition">
+                  <X className="w-8 h-8 text-gray-400" />
+                </button>
+              </div>
+              
+              <div className="flex-1 p-8 overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {webOrders.map(order => (
+                    <div key={order.id} className="bg-white p-6 rounded-[32px] shadow-sm border-2 border-gray-100 hover:border-red-100 transition-all">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <p className="text-xs font-black text-gray-400 uppercase">Cliente</p>
+                          <h3 className="text-xl font-black text-gray-900">{order.clientInfo.name}</h3>
+                          <p className="text-sm font-bold text-red-600">{order.clientInfo.phone}</p>
+                        </div>
+                        <span className="px-3 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full uppercase">Pendiente</span>
+                      </div>
+                      
+                      <div className="space-y-2 mb-6">
+                        {order.items.map((item: any, idx: number) => (
+                          <div key={idx} className="flex justify-between text-sm font-bold text-gray-600">
+                            <span>{item.quantity}x {item.name}</span>
+                            <span>${(item.price * item.quantity).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        <div className="pt-2 border-t flex justify-between font-black text-gray-900">
+                          <span>Total</span>
+                          <span>${order.total.toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      {order.clientInfo.address && (
+                        <div className="mb-4 p-3 bg-gray-50 rounded-xl">
+                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">Dirección</p>
+                          <p className="text-xs font-bold text-gray-700">{order.clientInfo.address}</p>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={async () => {
+                            try {
+                              await updateDoc(doc(db, 'web_orders', order.id), { status: 'completed' });
+                              Swal.fire('¡Completado!', 'El pedido ha sido marcado como completado.', 'success');
+                            } catch (error) {
+                              handleFirestoreError(error, OperationType.UPDATE, `web_orders/${order.id}`);
+                            }
+                          }}
+                          className="flex-1 py-3 bg-green-600 text-white font-black rounded-2xl hover:bg-green-700 transition"
+                        >
+                          COMPLETAR
+                        </button>
+                        <button 
+                          onClick={async () => {
+                            try {
+                              await updateDoc(doc(db, 'web_orders', order.id), { status: 'cancelled' });
+                            } catch (error) {
+                              handleFirestoreError(error, OperationType.UPDATE, `web_orders/${order.id}`);
+                            }
+                          }}
+                          className="px-4 py-3 bg-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-200 transition"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {webOrders.length === 0 && (
+                    <div className="col-span-full py-20 text-center">
+                      <Globe className="w-16 h-16 text-gray-200 mx-auto mb-4" />
+                      <p className="text-gray-400 font-black text-xl">No hay pedidos web pendientes</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </AnimatePresence>

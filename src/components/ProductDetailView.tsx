@@ -29,10 +29,11 @@ export const ProductDetailView: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    let unsubReviews: (() => void) | undefined;
+
     const q = query(collection(db, 'products'), where('active', '==', true));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-      // Find product by slug or generated slug
       const found = prods.find(p => {
         const pSlug = p.slug || p.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         return pSlug === slug;
@@ -40,21 +41,30 @@ export const ProductDetailView: React.FC = () => {
       
       if (found) {
         setProduct(found);
-        // Fetch reviews
+        
+        // Limpiar listener de reseñas anterior si existe
+        if (unsubReviews) unsubReviews();
+
         const reviewsQ = query(
           collection(db, 'reviews'), 
           where('productId', '==', found.id),
           orderBy('timestamp', 'desc')
         );
-        onSnapshot(reviewsQ, (revSnap) => {
+        unsubReviews = onSnapshot(reviewsQ, (revSnap) => {
           setReviews(revSnap.docs.map(d => ({ id: d.id, ...d.data() } as Review)));
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, 'reviews');
         });
       }
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'products');
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      if (unsubReviews) unsubReviews();
+    };
   }, [slug]);
 
   const handleAddToCart = () => {

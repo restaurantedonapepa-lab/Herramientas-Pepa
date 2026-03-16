@@ -172,7 +172,7 @@ export default function App() {
       <BrowserRouter>
         <div className="flex h-screen bg-gray-100 overflow-hidden">
           <Navigation user={user} />
-          <main className="flex-1 overflow-hidden flex flex-col">
+          <main className="flex-1 overflow-y-auto flex flex-col">
             <ErrorBoundary>
               <Routes>
                 <Route path="/" element={<CatalogView />} />
