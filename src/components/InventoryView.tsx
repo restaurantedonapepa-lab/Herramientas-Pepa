@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
-import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search } from 'lucide-react';
+import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles } from 'lucide-react';
+import Swal from 'sweetalert2';
 
 export const InventoryView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ingredients' | 'products'>('ingredients');
@@ -60,7 +61,6 @@ export const InventoryView: React.FC = () => {
       
       const text = await response.text();
       
-      // Función simple para parsear CSV respetando comillas
       const parseCSV = (str: string) => {
         const arr = [];
         let quote = false;
@@ -82,8 +82,8 @@ export const InventoryView: React.FC = () => {
 
       const rows = parseCSV(text);
       let importedCount = 0;
+      let updatedCount = 0;
       
-      // Saltar cabecera (i=1)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row || row.length < 2 || !row[1]) continue;
@@ -93,36 +93,99 @@ export const InventoryView: React.FC = () => {
         const category = row[3]?.trim() || 'General';
         const description = row[4]?.trim() || '';
         
-        // Extraer ID de imagen de Drive
         let imageId = '';
         const driveLink = row[5] || '';
         const idMatch = driveLink.match(/id=([a-zA-Z0-9_-]+)/) || driveLink.match(/\/d\/([a-zA-Z0-9_-]+)/);
         if (idMatch) imageId = idMatch[1];
 
         try {
-          await addDoc(collection(db, 'products'), {
-            name,
-            price: price, // Quitamos el +1000 para ser fieles a la hoja
-            category,
-            description,
-            imageId,
-            active: true,
-            recipe: []
-          });
-          importedCount++;
+          const existingProduct = products.find(p => 
+            p.name.toLowerCase().trim() === name.toLowerCase().trim() && 
+            p.category.toLowerCase().trim() === category.toLowerCase().trim()
+          );
+
+          if (existingProduct) {
+            if (price > existingProduct.price) {
+              await updateDoc(doc(db, 'products', existingProduct.id), { price });
+              updatedCount++;
+            }
+          } else {
+            await addDoc(collection(db, 'products'), {
+              name,
+              price: price,
+              category,
+              description,
+              imageId,
+              active: true,
+              recipe: []
+            });
+            importedCount++;
+          }
         } catch (err) {
           console.error(`Error importando fila ${i}:`, err);
-          // Si es error de permisos, lanzamos para que lo vea el ErrorBoundary o el catch general
-          if (err instanceof Error && err.message.includes('permission')) {
-            handleFirestoreError(err, OperationType.CREATE, 'products');
-          }
         }
       }
-      console.log(`Importación completada: ${importedCount} platos añadidos.`);
+      
+      Swal.fire({
+        title: 'Importación Finalizada',
+        html: `
+          <div class="text-left space-y-2">
+            <p>✅ <b>${importedCount}</b> platos nuevos añadidos.</p>
+            <p>📈 <b>${updatedCount}</b> precios actualizados.</p>
+            <p>Total procesado: ${rows.length - 1} filas.</p>
+          </div>
+        `,
+        icon: 'success'
+      });
     } catch (error) {
       console.error('Error importing:', error);
+      Swal.fire('Error', 'No se pudo completar la importación.', 'error');
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleCleanDuplicates = async () => {
+    const confirm = await Swal.fire({
+      title: '¿Limpiar duplicados?',
+      text: "Se eliminarán los platos que tengan el mismo nombre y categoría, dejando solo uno de cada uno.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Sí, limpiar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    const seen = new Set();
+    const toDelete = [];
+
+    // Ordenamos para que si hay duplicados, se mantenga el que tenga más información (opcional)
+    // Pero aquí simplemente el primero que encontremos se queda.
+    for (const prod of products) {
+      const key = `${prod.name.toLowerCase().trim()}-${prod.category.toLowerCase().trim()}`;
+      if (seen.has(key)) {
+        toDelete.push(prod.id);
+      } else {
+        seen.add(key);
+      }
+    }
+
+    if (toDelete.length === 0) {
+      Swal.fire('Sin duplicados', 'No se encontraron platos duplicados.', 'info');
+      return;
+    }
+
+    try {
+      for (const id of toDelete) {
+        await deleteDoc(doc(db, 'products', id));
+      }
+      Swal.fire('Limpieza completada', `Se eliminaron ${toDelete.length} platos duplicados.`, 'success');
+    } catch (error) {
+      console.error("Error cleaning duplicates:", error);
+      Swal.fire('Error', 'Hubo un problema al eliminar los duplicados.', 'error');
     }
   };
 
@@ -151,6 +214,50 @@ export const InventoryView: React.FC = () => {
     }
     setIsModalOpen(false);
     setEditingItem(null);
+  };
+
+  const handleDeleteIngredient = async (id: string) => {
+    const confirm = await Swal.fire({
+      title: '¿Eliminar insumo?',
+      text: "Esta acción no se puede deshacer y podría afectar a las recetas que usan este insumo.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        await deleteDoc(doc(db, 'ingredients', id));
+        Swal.fire('Eliminado', 'El insumo ha sido eliminado.', 'success');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `ingredients/${id}`);
+      }
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    const confirm = await Swal.fire({
+      title: '¿Eliminar plato?',
+      text: "Esta acción no se puede deshacer y el plato desaparecerá del catálogo y TPV.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        await deleteDoc(doc(db, 'products', id));
+        Swal.fire('Eliminado', 'El plato ha sido eliminado.', 'success');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `products/${id}`);
+      }
+    }
   };
 
   const handleSaveProduct = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -231,6 +338,15 @@ export const InventoryView: React.FC = () => {
         </div>
 
         <div className="flex gap-2">
+          {activeTab === 'products' && (
+            <button 
+              onClick={handleCleanDuplicates}
+              className="bg-white border border-orange-200 text-orange-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-50 transition shadow-sm"
+              title="Eliminar platos repetidos"
+            >
+              <Sparkles className="w-4 h-4" /> Limpiar Duplicados
+            </button>
+          )}
           <button 
             onClick={handleImportFromSheets}
             disabled={isImporting}
@@ -274,7 +390,7 @@ export const InventoryView: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 text-right space-x-2">
                     <button onClick={() => { setEditingItem(ing); setIsModalOpen(true); }} className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => deleteDoc(doc(db, 'ingredients', ing.id))} className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => handleDeleteIngredient(ing.id)} className="text-red-600 hover:bg-red-50 p-2 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
                   </td>
                 </tr>
               ))}
@@ -301,7 +417,7 @@ export const InventoryView: React.FC = () => {
                   </div>
                   <div className="flex gap-1">
                     <button onClick={() => { setEditingItem(prod); setIsModalOpen(true); }} className="text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
-                    <button onClick={() => deleteDoc(doc(db, 'products', prod.id))} className="text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => handleDeleteProduct(prod.id)} className="text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div className="space-y-2">

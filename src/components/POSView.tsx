@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, onSnapshot, addDoc, updateDoc, doc, 
   increment, serverTimestamp, query, where, getDocs,
@@ -50,11 +50,16 @@ export const POSView: React.FC = () => {
   const [webOrders, setWebOrders] = useState<any[]>([]);
   const [splitCount, setSplitCount] = useState<number>(1);
   const [isSplitting, setIsSplitting] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Payment States
   const [selectedItemsForPayment, setSelectedItemsForPayment] = useState<Record<string, number>>({});
   const [paymentMethod, setPaymentMethod] = useState<'Efectivo' | 'Nequi' | 'Daviplata' | 'Tarjeta' | 'QR' | 'Mixto'>('Efectivo');
-  const [mixedPayments, setMixedPayments] = useState({ method1: 'Efectivo', val1: 0, method2: 'Nequi', val2: 0 });
+  const [mixedPayments, setMixedPayments] = useState({ 
+    method1: 'Efectivo', val1: 0, 
+    method2: 'Nequi', val2: 0,
+    method3: 'Daviplata', val3: 0 
+  });
   const [receivedAmount, setReceivedAmount] = useState<number>(0);
 
   // Report States
@@ -67,14 +72,13 @@ export const POSView: React.FC = () => {
   const categories = useMemo(() => ['all', ...new Set(products.map(p => p.category))], [products]);
   const filteredProducts = useMemo(() => {
     let filtered = products.filter(p => p.active);
-    if (activeCategory !== 'all') {
-      filtered = filtered.filter(p => p.category === activeCategory);
-    }
     if (searchTerm) {
       filtered = filtered.filter(p => 
         p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.category.toLowerCase().includes(searchTerm.toLowerCase())
       );
+    } else if (activeCategory !== 'all') {
+      filtered = filtered.filter(p => p.category === activeCategory);
     }
     return filtered;
   }, [products, activeCategory, searchTerm]);
@@ -232,6 +236,35 @@ export const POSView: React.FC = () => {
   useEffect(() => { if (showReportsModal) fetchReportData(); }, [showReportsModal, reportRange]);
   useEffect(() => { if (showHistoryModal) fetchHistoryData(); }, [showHistoryModal]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showPaymentModal && paymentMethod === 'Efectivo') {
+        if (e.key >= '0' && e.key <= '9') {
+          setReceivedAmount(prev => Number(prev.toString() + e.key));
+          return;
+        } else if (e.key === 'Backspace') {
+          setReceivedAmount(prev => {
+            const s = prev.toString();
+            return s.length > 1 ? Number(s.slice(0, -1)) : 0;
+          });
+          return;
+        }
+      }
+
+      if (view === 'menu' && !showPaymentModal && !showReportsModal && !showExpensesModal && !showHistoryModal && !showWebOrdersModal) {
+        // If not typing in an input (except our search input)
+        if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+          // If it's a letter, number or space
+          if (e.key.length === 1 || e.key === 'Backspace') {
+            searchInputRef.current?.focus();
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, showPaymentModal, showReportsModal, showExpensesModal, showHistoryModal, showWebOrdersModal, paymentMethod]);
+
   const reportStats = useMemo(() => {
     const totalSales = reportData.sales.reduce((sum, s) => sum + s.total, 0);
     const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
@@ -267,6 +300,10 @@ export const POSView: React.FC = () => {
     setActiveCategory('all');
     setSearchTerm('');
     setSelectedItemsForPayment({});
+    // Focus search input after a short delay to allow transition
+    setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 300);
   };
 
   const closeTable = () => {
@@ -442,43 +479,53 @@ export const POSView: React.FC = () => {
                   <button onClick={closeTable} className="p-2 bg-gray-50 border rounded-xl hover:bg-gray-100 transition"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
                   <div className="flex-1 relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                    <input type="text" placeholder="Buscar plato o categoría..." className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-medium" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} autoFocus />
+                    <input 
+                      ref={searchInputRef}
+                      type="text" 
+                      placeholder="Buscar plato o categoría..." 
+                      className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-medium" 
+                      value={searchTerm} 
+                      onChange={(e) => setSearchTerm(e.target.value)} 
+                    />
                   </div>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                  {categories.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCategory(cat)}
-                      className={cn(
-                        "px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap border-2",
-                        activeCategory === cat 
-                          ? "bg-red-600 border-red-600 text-white shadow-lg shadow-red-200" 
-                          : "bg-white border-gray-100 text-gray-400 hover:border-red-200"
-                      )}
-                    >
-                      {cat === 'all' ? 'Todos' : cat}
-                    </button>
-                  ))}
-                </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
-                {filteredProducts.map(product => (
-                  <button key={product.id} onClick={() => addToOrder(product)} className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group">
-                    <div className="aspect-square relative overflow-hidden bg-gray-50">
-                      <img src={getDriveImageUrl(product.imageId)} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3"><span className="text-white text-xs font-bold uppercase tracking-widest">Añadir</span></div>
-                    </div>
-                    <div className="p-4 flex-1 flex flex-col">
-                      <h3 className="font-black text-sm text-gray-800 line-clamp-2 leading-tight mb-2">{product.name}</h3>
-                      <p className="text-red-600 font-black text-lg mt-auto">${product.price.toLocaleString()}</p>
-                    </div>
-                  </button>
-                ))}
-                {filteredProducts.length === 0 && (
-                  <div className="col-span-full py-20 text-center text-gray-400">
-                    <Search className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                    <p className="font-black uppercase tracking-widest text-sm">No se encontraron platos</p>
+              <div className="flex-1 overflow-y-auto p-6">
+                {activeCategory === 'all' && !searchTerm ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {categories.filter(c => c !== 'all').map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setActiveCategory(cat)}
+                        className="aspect-square bg-white rounded-[32px] border-2 border-gray-100 shadow-sm hover:shadow-xl hover:border-red-200 transition-all flex flex-col items-center justify-center p-4 text-center group"
+                      >
+                        <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                          <UtensilsCrossed className="w-8 h-8 text-red-600" />
+                        </div>
+                        <span className="font-black text-xs uppercase tracking-widest text-gray-800">{cat}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
+                    {filteredProducts.map(product => (
+                      <button key={product.id} onClick={() => addToOrder(product)} className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group">
+                        <div className="aspect-square relative overflow-hidden bg-gray-50">
+                          <img src={getDriveImageUrl(product.imageId)} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3"><span className="text-white text-xs font-bold uppercase tracking-widest">Añadir</span></div>
+                        </div>
+                        <div className="p-4 flex-1 flex flex-col">
+                          <h3 className="font-black text-sm text-gray-800 line-clamp-2 leading-tight mb-2">{product.name}</h3>
+                          <p className="text-red-600 font-black text-lg mt-auto">${product.price.toLocaleString()}</p>
+                        </div>
+                      </button>
+                    ))}
+                    {filteredProducts.length === 0 && (
+                      <div className="col-span-full py-20 text-center text-gray-400">
+                        <Search className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                        <p className="font-black uppercase tracking-widest text-sm">No se encontraron platos</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -563,56 +610,62 @@ export const POSView: React.FC = () => {
                 <div className="flex justify-between items-center mb-8"><h3 className="text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
                 <div className="grid grid-cols-3 gap-3 mb-8">
                   {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
-                    <button key={m} onClick={() => { setPaymentMethod(m as any); setIsSplitting(false); }} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m && !isSplitting ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
+                    <button key={m} onClick={() => setPaymentMethod(m as any)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
                   ))}
-                  <button onClick={() => setIsSplitting(true)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", isSplitting ? "bg-orange-50 border-orange-600 text-orange-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}><Split className="w-4 h-4" />Dividir</button>
                 </div>
                 <div className="flex-1">
-                  {isSplitting ? (
-                    <div className="space-y-8 text-center py-10">
-                      <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Dividir cuenta entre</p>
-                      <div className="flex items-center justify-center gap-6">
-                        <button onClick={() => setSplitCount(Math.max(1, splitCount - 1))} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-2xl font-black hover:bg-gray-50">-</button>
-                        <span className="text-6xl font-black text-gray-900">{splitCount}</span>
-                        <button onClick={() => setSplitCount(splitCount + 1)} className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center text-2xl font-black hover:bg-gray-50">+</button>
-                      </div>
-                      <div className="pt-8 border-t">
-                        <p className="text-xs font-black text-gray-400 uppercase mb-2">Cada persona paga</p>
-                        <p className="text-4xl font-black text-orange-600 mb-6">${Math.round(currentTotalToPay / splitCount).toLocaleString()}</p>
-                        <button 
-                          onClick={() => {
-                            setReceivedAmount(Math.round(currentTotalToPay / splitCount));
-                            setIsSplitting(false);
-                            setPaymentMethod('Efectivo');
-                          }}
-                          className="w-full py-3 bg-orange-100 text-orange-700 font-black rounded-xl hover:bg-orange-200 transition"
-                        >
-                          PAGAR UNA PARTE
-                        </button>
-                      </div>
-                    </div>
-                  ) : paymentMethod === 'Efectivo' ? (
+                  {paymentMethod === 'Efectivo' ? (
                     <div className="grid grid-cols-3 gap-3 h-full">
                       {[7, 8, 9, 4, 5, 6, 1, 2, 3, 'C', 0, '00'].map(val => (
                         <button key={val} onClick={() => { if (val === 'C') setReceivedAmount(0); else if (val === '00') setReceivedAmount(prev => Number(prev.toString() + '00')); else setReceivedAmount(prev => Number(prev.toString() + val.toString())); }} className="bg-gray-50 rounded-2xl font-black text-2xl text-gray-800 hover:bg-gray-100 transition">{val}</button>
                       ))}
                     </div>
                   ) : paymentMethod === 'Mixto' ? (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2">
+                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl">
                         <div className="space-y-2">
-                          <label className="text-xs font-black text-gray-400 uppercase">Método 1</label>
-                          <select className="w-full p-3 bg-gray-50 border rounded-xl font-bold" value={mixedPayments.method1} onChange={(e) => setMixedPayments(prev => ({ ...prev, method1: e.target.value }))}>
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Método 1</label>
+                          <select className="w-full p-2 bg-white border rounded-xl font-bold text-sm" value={mixedPayments.method1} onChange={(e) => setMixedPayments(prev => ({ ...prev, method1: e.target.value }))}>
                             <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option>
                           </select>
-                          <input type="number" className="w-full p-3 bg-white border-2 border-red-100 rounded-xl font-black text-xl" value={mixedPayments.val1} onChange={(e) => { const v1 = Number(e.target.value); setMixedPayments(prev => ({ ...prev, val1: v1, val2: Math.max(0, currentTotalToPay - v1) })); }} />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-black text-gray-400 uppercase">Método 2</label>
-                          <select className="w-full p-3 bg-gray-50 border rounded-xl font-bold" value={mixedPayments.method2} onChange={(e) => setMixedPayments(prev => ({ ...prev, method2: e.target.value }))}>
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 1</label>
+                          <input type="number" className="w-full p-2 bg-white border-2 border-red-100 rounded-xl font-black text-lg" value={mixedPayments.val1} onChange={(e) => { 
+                            const v1 = Number(e.target.value); 
+                            const remaining = Math.max(0, currentTotalToPay - v1);
+                            setMixedPayments(prev => ({ ...prev, val1: v1, val2: remaining, val3: 0 })); 
+                          }} />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Método 2</label>
+                          <select className="w-full p-2 bg-white border rounded-xl font-bold text-sm" value={mixedPayments.method2} onChange={(e) => setMixedPayments(prev => ({ ...prev, method2: e.target.value }))}>
                             <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option>
                           </select>
-                          <input type="number" className="w-full p-3 bg-gray-50 border rounded-xl font-black text-xl text-gray-400" value={mixedPayments.val2} readOnly />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 2</label>
+                          <input type="number" className="w-full p-2 bg-white border-2 border-red-100 rounded-xl font-black text-lg" value={mixedPayments.val2} onChange={(e) => { 
+                            const v2 = Number(e.target.value); 
+                            const remaining = Math.max(0, currentTotalToPay - mixedPayments.val1 - v2);
+                            setMixedPayments(prev => ({ ...prev, val2: v2, val3: remaining })); 
+                          }} />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Método 3</label>
+                          <select className="w-full p-2 bg-white border rounded-xl font-bold text-sm" value={mixedPayments.method3} onChange={(e) => setMixedPayments(prev => ({ ...prev, method3: e.target.value }))}>
+                            <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 3</label>
+                          <input type="number" className="w-full p-2 bg-gray-100 border rounded-xl font-black text-lg text-gray-500" value={mixedPayments.val3} readOnly />
                         </div>
                       </div>
                     </div>

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { SaleItem, Product } from '../types';
 import { auth, db } from '../firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 
 interface UserProfile {
   uid: string;
@@ -58,25 +58,57 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         const userRef = doc(db, 'users', user.uid);
-        return onSnapshot(userRef, (doc) => {
-          if (doc.exists()) {
-            setUserProfile(doc.data() as UserProfile);
+        return onSnapshot(userRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            setUserProfile(data as UserProfile);
+            
+            // Sync cart and favorites from Firestore if they exist and are different
+            if (data.cart) {
+              setCart(currentCart => {
+                if (JSON.stringify(data.cart) === JSON.stringify(currentCart)) return currentCart;
+                return data.cart;
+              });
+            }
+            if (data.favorites) {
+              setFavorites(currentFavs => {
+                if (JSON.stringify(data.favorites) === JSON.stringify(currentFavs)) return currentFavs;
+                return data.favorites;
+              });
+            }
           }
         });
       } else {
         setUserProfile(null);
+        // Load from localStorage for guests
+        const savedCart = localStorage.getItem('cart');
+        const savedFavs = localStorage.getItem('favorites');
+        if (savedCart) setCart(JSON.parse(savedCart));
+        if (savedFavs) setFavorites(JSON.parse(savedFavs));
       }
     });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('cart', JSON.stringify(cart));
-  }, [cart]);
+    if (!userProfile) {
+      localStorage.setItem('cart', JSON.stringify(cart));
+    } else {
+      // Update Firestore
+      const userRef = doc(db, 'users', userProfile.uid);
+      updateDoc(userRef, { cart }).catch(err => console.error("Error syncing cart:", err));
+    }
+  }, [cart, userProfile]);
 
   useEffect(() => {
-    localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites]);
+    if (!userProfile) {
+      localStorage.setItem('favorites', JSON.stringify(favorites));
+    } else {
+      // Update Firestore
+      const userRef = doc(db, 'users', userProfile.uid);
+      updateDoc(userRef, { favorites }).catch(err => console.error("Error syncing favorites:", err));
+    }
+  }, [favorites, userProfile]);
 
   const addToCart = (item: SaleItem) => {
     setCart(prev => {
