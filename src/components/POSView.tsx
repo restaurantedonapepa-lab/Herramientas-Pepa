@@ -73,6 +73,7 @@ export const POSView: React.FC = () => {
   const [isPrinterConnected, setIsPrinterConnected] = useState(printerService.isConnected());
   const [webOrders, setWebOrders] = useState<any[]>([]);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const [productOrder, setProductOrder] = useState<string[]>([]);
 
   // Detectar cambios en la conexión USB
   useEffect(() => {
@@ -134,8 +135,17 @@ export const POSView: React.FC = () => {
     } else if (activeCategory !== 'all') {
       filtered = filtered.filter(p => p.category === activeCategory);
     }
-    return filtered;
-  }, [products, activeCategory, searchTerm]);
+
+    // Sort by productOrder
+    return filtered.sort((a, b) => {
+      const indexA = productOrder.indexOf(a.id);
+      const indexB = productOrder.indexOf(b.id);
+      if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+  }, [products, activeCategory, searchTerm, productOrder]);
 
   // ... (previous memos)
 
@@ -152,7 +162,12 @@ export const POSView: React.FC = () => {
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    if (over && active.id !== over.id) {
+    if (!over || active.id === over.id) return;
+
+    // Check if we are dragging a category or a product
+    const isCategory = categories.includes(active.id as string);
+
+    if (isCategory) {
       const oldIndex = categories.indexOf(active.id as string);
       const newIndex = categories.indexOf(over.id as string);
       
@@ -165,9 +180,77 @@ export const POSView: React.FC = () => {
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'settings');
       }
+    } else {
+      // Dragging a product
+      const oldIndex = filteredProducts.findIndex(p => p.id === active.id);
+      const newIndex = filteredProducts.findIndex(p => p.id === over.id);
+      
+      // We need to update the GLOBAL product order
+      // We take the current productOrder and move the item
+      // If it's not in the order, we add it
+      let newOrder = [...productOrder];
+      
+      // Ensure both products are in the order list for arrayMove to work correctly if they were sorted by name
+      const activeId = active.id as string;
+      const overId = over.id as string;
+      
+      if (!newOrder.includes(activeId)) newOrder.push(activeId);
+      if (!newOrder.includes(overId)) {
+        // Insert overId near activeId if it wasn't there
+        newOrder.push(overId);
+      }
+
+      const orderOldIndex = newOrder.indexOf(activeId);
+      const orderNewIndex = newOrder.indexOf(overId);
+      
+      newOrder = arrayMove(newOrder, orderOldIndex, orderNewIndex);
+      
+      setProductOrder(newOrder);
+      try {
+        await setDoc(doc(db, 'settings', 'product_order'), { order: newOrder });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'settings');
+      }
     }
   };
 
+  const SortableProduct = ({ product, onClick }: { product: Product, onClick: () => void }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging
+    } = useSortable({ id: product.id });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      zIndex: isDragging ? 50 : 'auto',
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <button
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        onClick={onClick}
+        className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group touch-none"
+      >
+        <div className="aspect-square relative overflow-hidden bg-gray-50">
+          <img src={getDriveImageUrl(product.imageId)} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3"><span className="text-white text-xs font-bold uppercase tracking-widest">Añadir</span></div>
+        </div>
+        <div className="p-4 flex-1 flex flex-col">
+          <h3 className="font-black text-sm text-gray-800 line-clamp-2 leading-tight mb-2">{product.name}</h3>
+          <p className="text-red-600 font-black text-lg mt-auto">${product.price.toLocaleString()}</p>
+        </div>
+      </button>
+    );
+  };
   const SortableCategory = ({ cat, onClick }: { cat: string, onClick: () => void }) => {
     const {
       attributes,
@@ -308,6 +391,7 @@ export const POSView: React.FC = () => {
     let unsubTables: (() => void) | undefined;
     let unsubWebOrders: (() => void) | undefined;
     let unsubCategoryOrder: (() => void) | undefined;
+    let unsubProductOrder: (() => void) | undefined;
 
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
       // Limpiar listeners anteriores si existen
@@ -316,6 +400,7 @@ export const POSView: React.FC = () => {
       if (unsubTables) unsubTables();
       if (unsubWebOrders) unsubWebOrders();
       if (unsubCategoryOrder) unsubCategoryOrder();
+      if (unsubProductOrder) unsubProductOrder();
 
       if (!user) {
         setProducts([]);
@@ -323,6 +408,7 @@ export const POSView: React.FC = () => {
         setTables([]);
         setWebOrders([]);
         setCategoryOrder([]);
+        setProductOrder([]);
         return;
       }
 
@@ -363,6 +449,12 @@ export const POSView: React.FC = () => {
           setCategoryOrder(snapshot.data().order || []);
         }
       });
+
+      unsubProductOrder = onSnapshot(doc(db, 'settings', 'product_order'), (snapshot) => {
+        if (snapshot.exists()) {
+          setProductOrder(snapshot.data().order || []);
+        }
+      });
     });
 
     return () => {
@@ -372,6 +464,7 @@ export const POSView: React.FC = () => {
       if (unsubTables) unsubTables();
       if (unsubWebOrders) unsubWebOrders();
       if (unsubCategoryOrder) unsubCategoryOrder();
+      if (unsubProductOrder) unsubProductOrder();
     };
   }, []);
 
@@ -579,25 +672,114 @@ export const POSView: React.FC = () => {
 
   const deleteSale = async (saleId: string) => {
     const result = await Swal.fire({
-      title: '¿Eliminar Venta?',
-      text: 'Esta acción no se puede deshacer.',
+      title: '¿Anular Venta?',
+      text: 'La venta aparecerá tachada en el historial y no se contará en los reportes.',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonText: 'Sí, eliminar',
+      confirmButtonText: 'Sí, anular',
       cancelButtonText: 'Cancelar'
     });
 
     if (result.isConfirmed) {
       try {
-        await deleteDoc(doc(db, 'sales', saleId));
-        Swal.fire('Eliminado', 'La venta ha sido eliminada.', 'success');
+        await updateDoc(doc(db, 'sales', saleId), { status: 'cancelled' });
+        Swal.fire('Anulada', 'La venta ha sido anulada.', 'success');
         fetchHistoryData();
         if (showReportsModal) fetchReportData();
       } catch (error) {
-        console.error('Error deleting sale:', error);
-        Swal.fire('Error', 'No se pudo eliminar la venta.', 'error');
+        console.error('Error cancelling sale:', error);
+        Swal.fire('Error', 'No se pudo anular la venta.', 'error');
       }
     }
+  };
+
+  const printSale = async (sale: Sale) => {
+    const dateStr = sale.timestamp?.toDate ? sale.timestamp.toDate().toLocaleString('es-CO') : new Date().toLocaleString('es-CO');
+    const htmlItems = sale.items.map(i => `
+        <div style="display:flex; align-items:flex-start; margin-bottom:4px; font-size:12px;">
+            <div style="white-space:nowrap; margin-right:5px; font-weight:bold;">${i.quantity} x</div>
+            <div style="flex:1; text-align:left; padding-right:5px; line-height:1.2;">${i.name}</div>
+            <div style="white-space:nowrap; font-weight:bold;">$${(i.price * i.quantity).toLocaleString('es-CO')}</div>
+        </div>
+        ${i.note ? `<div style="font-size: 10px; color: #666; margin-left: 25px; margin-bottom: 4px;">* ${i.note}</div>` : ''}
+    `).join('');
+
+    const printArea = document.getElementById('printable-area');
+    if (!printArea) return;
+    
+    printArea.innerHTML = `
+        <div style="width: 100%; text-align: center; font-family: monospace; color:black;">
+            <h2 style="margin:0; font-size:18px; font-weight:bold;">RESTAURANTE</h2>
+            <h2 style="margin:0; font-size:18px; font-weight:bold;">DOÑA PEPA</h2>
+            <p style="margin:0; font-size:14px; font-weight:bold;">*** RECIBO DE VENTA ***</p>
+            <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
+            
+            <div style="text-align:left; font-size:12px;">
+                <p style="margin: 2px 0;"><strong>Mesa:</strong> ${sale.table} - ${sale.clientName}</p>
+                <p style="margin: 2px 0;">${dateStr}</p>
+                <p style="margin: 2px 0;"><strong>Pago:</strong> ${sale.paymentMethod}</p>
+            </div>
+            
+            <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
+            
+            <div style="text-align:left;">
+                ${htmlItems}
+            </div>
+            
+            <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
+            
+            <div style="text-align:right; font-size:16px; font-weight:bold; margin-top:5px;">
+                <p style="margin: 0;">TOTAL: $${sale.total.toLocaleString('es-CO')}</p>
+            </div>
+            
+            <div style="margin-top:20px; font-size:11px;">
+                <p style="margin: 2px 0;">Gracias por su visita</p>
+                <p style="margin: 2px 0;">www.donapepacucuta.com</p>
+            </div>
+            <br>.
+        </div>
+    `;
+    
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  const viewSale = (sale: Sale) => {
+    const htmlItems = sale.items.map(i => `
+      <div class="flex justify-between text-sm py-1 border-b border-gray-100">
+        <span>${i.quantity}x ${i.name}</span>
+        <span class="font-bold">$${(i.price * i.quantity).toLocaleString()}</span>
+      </div>
+    `).join('');
+
+    Swal.fire({
+      title: `<h3 class="text-xl font-black">Detalle de Venta</h3>`,
+      html: `
+        <div class="text-left space-y-4">
+          <div class="bg-gray-50 p-4 rounded-2xl">
+            <p class="text-xs font-black text-gray-400 uppercase">Información</p>
+            <p class="text-sm font-bold">Mesa: ${sale.table}</p>
+            <p class="text-sm font-bold">Cliente: ${sale.clientName}</p>
+            <p class="text-sm font-bold">Fecha: ${sale.timestamp?.toDate ? sale.timestamp.toDate().toLocaleString() : 'N/A'}</p>
+            <p class="text-sm font-bold">Método: ${sale.paymentMethod}</p>
+          </div>
+          <div>
+            <p class="text-xs font-black text-gray-400 uppercase mb-2">Productos</p>
+            ${htmlItems}
+          </div>
+          <div class="flex justify-between items-center pt-4 border-t">
+            <span class="text-lg font-black uppercase">Total</span>
+            <span class="text-2xl font-black text-red-600">$${sale.total.toLocaleString()}</span>
+          </div>
+        </div>
+      `,
+      showCloseButton: true,
+      showConfirmButton: false,
+      customClass: {
+        popup: 'rounded-[32px]'
+      }
+    });
   };
 
   const clearAllSales = async () => {
@@ -840,13 +1022,14 @@ export const POSView: React.FC = () => {
   }, [view, showPaymentModal, showReportsModal, showExpensesModal, showHistoryModal, showWebOrdersModal, paymentMethod]);
 
   const reportStats = useMemo(() => {
-    const totalSales = reportData.sales.reduce((sum, s) => sum + s.total, 0);
+    const activeSales = reportData.sales.filter(s => s.status !== 'cancelled');
+    const totalSales = activeSales.reduce((sum, s) => sum + s.total, 0);
     const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
     
     const salesByCategory: Record<string, number> = {};
     const salesByItem: Record<string, { name: string, quantity: number, total: number }> = {};
     
-    reportData.sales.forEach(sale => {
+    activeSales.forEach(sale => {
       sale.items.forEach(item => {
         const prod = products.find(p => p.id === item.productId);
         const cat = prod?.category || 'Otros';
@@ -868,7 +1051,7 @@ export const POSView: React.FC = () => {
       'QR': 0
     };
     
-    reportData.sales.forEach(sale => {
+    activeSales.forEach(sale => {
       const method = sale.paymentMethod.split(':')[0].trim();
       if (method === 'Mixto') {
         // Parse mixed payment string: "Mixto: Efectivo ($10.000), Nequi ($5.000)"
@@ -943,6 +1126,7 @@ export const POSView: React.FC = () => {
       newItems.push({ productId: product.id, name: product.name, price: product.price, quantity: 1, originalPrice: product.price, note: '' });
     }
     await updateDoc(doc(db, 'tables', activeTableId), { items: newItems, status: 'busy', lastUpdate: serverTimestamp() });
+    setSearchTerm('');
   };
 
   const updateItemQty = async (productId: string, delta: number) => {
@@ -1188,26 +1372,32 @@ export const POSView: React.FC = () => {
                     </SortableContext>
                   </DndContext>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
-                    {filteredProducts.map(product => (
-                      <button key={product.id} onClick={() => addToOrder(product)} className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group">
-                        <div className="aspect-square relative overflow-hidden bg-gray-50">
-                          <img src={getDriveImageUrl(product.imageId)} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3"><span className="text-white text-xs font-bold uppercase tracking-widest">Añadir</span></div>
-                        </div>
-                        <div className="p-4 flex-1 flex flex-col">
-                          <h3 className="font-black text-sm text-gray-800 line-clamp-2 leading-tight mb-2">{product.name}</h3>
-                          <p className="text-red-600 font-black text-lg mt-auto">${product.price.toLocaleString()}</p>
-                        </div>
-                      </button>
-                    ))}
-                    {filteredProducts.length === 0 && (
-                      <div className="col-span-full py-20 text-center text-gray-400">
-                        <Search className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                        <p className="font-black uppercase tracking-widest text-sm">No se encontraron platos</p>
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext
+                      items={filteredProducts.map(p => p.id)}
+                      strategy={rectSortingStrategy}
+                    >
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
+                        {filteredProducts.map(product => (
+                          <SortableProduct 
+                            key={product.id} 
+                            product={product} 
+                            onClick={() => addToOrder(product)} 
+                          />
+                        ))}
+                        {filteredProducts.length === 0 && (
+                          <div className="col-span-full py-20 text-center text-gray-400">
+                            <Search className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                            <p className="font-black uppercase tracking-widest text-sm">No se encontraron platos</p>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </SortableContext>
+                  </DndContext>
                 )}
               </div>
             </motion.div>
@@ -1299,8 +1489,8 @@ export const POSView: React.FC = () => {
                 <h3 className="text-xs font-black uppercase tracking-[0.2em] text-gray-500 mb-12">Resumen de Pago</h3>
                 <div className="space-y-8 flex-1">
                   <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Total</p><p className="text-4xl font-black">${currentTotalToPay.toLocaleString()}</p></div>
-                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Recibido</p><p className="text-4xl font-black text-blue-400">${receivedAmount.toLocaleString()}</p></div>
-                  <div className="pt-8 border-t border-white/10"><p className="text-xs font-bold text-gray-500 uppercase mb-2">Cambio</p><p className={cn("text-5xl font-black", receivedAmount >= currentTotalToPay ? "text-green-400" : "text-red-400")}>${Math.max(0, receivedAmount - currentTotalToPay).toLocaleString()}</p></div>
+                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Recibido</p><p className="text-4xl font-black text-blue-400">${(paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount).toLocaleString()}</p></div>
+                  <div className="pt-8 border-t border-white/10"><p className="text-xs font-bold text-gray-500 uppercase mb-2">Cambio</p><p className={cn("text-5xl font-black", (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) >= currentTotalToPay ? "text-green-400" : "text-red-400")}>${Math.max(0, (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) - currentTotalToPay).toLocaleString()}</p></div>
                 </div>
                 <div className="bg-white/5 rounded-2xl p-4 text-center"><p className="text-xs font-black uppercase tracking-widest text-gray-400">{paymentMethod}</p></div>
               </div>
@@ -1390,7 +1580,7 @@ export const POSView: React.FC = () => {
                     <div className="h-full flex flex-col items-center justify-center text-center text-gray-400"><CheckCircle2 className="w-16 h-16 mb-4 text-green-500" /><p className="font-black uppercase tracking-widest">Monto Asignado</p></div>
                   )}
                 </div>
-                <button onClick={handlePayment} data-confirm-payment="true" disabled={receivedAmount < currentTotalToPay && paymentMethod !== 'Mixto'} className="mt-8 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all">CONFIRMAR PAGO</button>
+                <button onClick={handlePayment} data-confirm-payment="true" disabled={paymentMethod !== 'Mixto' && receivedAmount < currentTotalToPay} className="mt-8 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all">CONFIRMAR PAGO</button>
               </div>
             </motion.div>
           </div>
@@ -1569,16 +1759,26 @@ export const POSView: React.FC = () => {
                   <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th><th className="pb-4 text-right">Acción</th></tr></thead>
                   <tbody className="divide-y">
                     {historyData.map(sale => (
-                      <tr key={sale.id} className="hover:bg-gray-50 transition">
+                      <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
                         <td className="py-4 text-sm font-bold">{sale.timestamp?.toDate().toLocaleString()}</td>
                         <td className="py-4 text-sm font-black">{sale.table}</td>
                         <td className="py-4 text-sm font-medium">{sale.clientName}</td>
                         <td className="py-4 text-xs font-black uppercase text-gray-500">{sale.paymentMethod}</td>
                         <td className="py-4 text-right font-black text-gray-900">${sale.total.toLocaleString()}</td>
                         <td className="py-4 text-right">
-                          <button onClick={() => deleteSale(sale.id)} className="p-2 text-gray-300 hover:text-red-600 transition">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex justify-end gap-1">
+                            <button onClick={() => viewSale(sale)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Ver Tiquet">
+                              <FileText className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => printSale(sale)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition" title="Imprimir Tiquet">
+                              <Printer className="w-4 h-4" />
+                            </button>
+                            {sale.status !== 'cancelled' && (
+                              <button onClick={() => deleteSale(sale.id)} className="p-2 text-gray-300 hover:text-red-600 transition" title="Anular Venta">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

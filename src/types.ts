@@ -40,6 +40,7 @@ export interface Sale {
   timestamp: any;
   clientName: string;
   table: string;
+  status?: 'cancelled';
 }
 
 export interface SaleItem {
