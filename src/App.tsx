@@ -25,6 +25,12 @@ import {
   Home,
   Users
 } from 'lucide-react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: any }> {
   constructor(props: any) {
@@ -195,16 +201,18 @@ function AppContent() {
     <div className="flex h-screen bg-gray-100 overflow-hidden">
       <GoogleOneTap />
       {!isKiosk && <Navigation user={user} userProfile={userProfile} />}
-      <main className="flex-1 overflow-y-auto flex flex-col">
+      <main className={cn("flex-1 flex flex-col", location.pathname === '/pos' ? "overflow-hidden" : "overflow-y-auto")}>
         {!isKiosk && <Header />}
         <ErrorBoundary>
-          <Routes>
-            <Route path="/" element={<CatalogView />} />
-            <Route path="/pos" element={<POSView />} />
-            <Route path="/inventory" element={<InventoryView />} />
-            <Route path="/users" element={<UserManagementView />} />
-            <Route path="/:slug" element={<ProductDetailView />} />
-          </Routes>
+          <div className="flex-1 flex flex-col min-h-0">
+            <Routes>
+              <Route path="/" element={<CatalogView />} />
+              <Route path="/pos" element={<POSView />} />
+              <Route path="/inventory" element={<InventoryView />} />
+              <Route path="/users" element={<UserManagementView />} />
+              <Route path="/:slug" element={<ProductDetailView />} />
+            </Routes>
+          </div>
         </ErrorBoundary>
       </main>
     </div>

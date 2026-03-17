@@ -6,12 +6,26 @@
 }
 
 @layer base {
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
+  /* Forzar visibilidad de barras de desplazamiento */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
   }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+  ::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #999;
+  }
+  
+  /* Para Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #ccc #f1f1f1;
   }
 }
 

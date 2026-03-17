@@ -947,12 +947,12 @@ export const POSView: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full bg-gray-100 overflow-hidden relative">
+    <div className="flex h-full bg-gray-100 overflow-hidden relative min-h-0">
       {/* Left Panel */}
-      <div className="flex-1 flex flex-col min-w-0 border-r relative">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 border-r relative">
         <AnimatePresence mode="wait">
           {view === 'tables' && (
-            <motion.div key="tables" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col p-6 overflow-y-auto">
+            <motion.div key="tables" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col p-6 overflow-y-auto min-h-0">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
                 <div className="flex gap-2">
@@ -1033,7 +1033,7 @@ export const POSView: React.FC = () => {
           )}
 
           {view === 'menu' && (
-            <motion.div key="menu" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="flex-1 flex flex-col">
+            <motion.div key="menu" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="flex-1 flex flex-col min-h-0">
               <div className="p-6 bg-white border-b space-y-4 sticky top-0 z-10">
                 <div className="flex items-center gap-4">
                   <button onClick={closeTable} className="p-2 bg-gray-50 border rounded-xl hover:bg-gray-100 transition"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
@@ -1050,7 +1050,7 @@ export const POSView: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+              <div className="flex-1 overflow-y-auto p-6">
                 {activeCategory === 'all' && !searchTerm ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     {categories.filter(c => c !== 'all').map(cat => (
