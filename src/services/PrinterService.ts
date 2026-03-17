@@ -14,14 +14,41 @@ class PrinterService {
 
   async requestDevice(): Promise<boolean> {
     try {
-      this.device = await navigator.usb.requestDevice({
-        filters: [{ classCode: 0x07 }] // Printer class
-      });
+      // Intentar con filtro de clase impresora, si falla permitir cualquier dispositivo
+      try {
+        this.device = await navigator.usb.requestDevice({
+          filters: [{ classCode: 0x07 }] 
+        });
+      } catch (e) {
+        this.device = await navigator.usb.requestDevice({ filters: [] });
+      }
+
+      if (!this.device) return false;
+
       await this.device.open();
+      
       if (this.device.configuration === null) {
         await this.device.selectConfiguration(1);
       }
-      await this.device.claimInterface(0);
+
+      // Buscar la interfaz que tenga el endpoint de impresión (bulk out)
+      let targetInterface = 0;
+      let targetEndpoint = 0;
+
+      const interfaces = this.device.configuration?.interfaces || [];
+      for (const iface of interfaces) {
+        const endpoints = iface.alternate.endpoints;
+        const outEndpoint = endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
+        if (outEndpoint) {
+          targetInterface = iface.interfaceNumber;
+          targetEndpoint = outEndpoint.endpointNumber;
+          break;
+        }
+      }
+
+      await this.device.claimInterface(targetInterface);
+      (this.device as any)._targetEndpoint = targetEndpoint;
+      
       return true;
     } catch (error) {
       console.error('Error al conectar impresora:', error);
@@ -89,16 +116,13 @@ class PrinterService {
 
     const bytes = result.encode();
     
-    // Encontrar el endpoint de salida (bulk out)
-    const endpoint = this.device.configuration?.interfaces[0].alternate.endpoints.find(
-      e => e.direction === 'out' && e.type === 'bulk'
-    );
+    const endpointNumber = (this.device as any)._targetEndpoint;
 
-    if (!endpoint) {
+    if (!endpointNumber) {
       throw new Error('No se encontró el endpoint de salida de la impresora');
     }
 
-    await this.device.transferOut(endpoint.endpointNumber, bytes);
+    await this.device.transferOut(endpointNumber, bytes);
   }
 }
 
