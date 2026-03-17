@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, onSnapshot, addDoc, updateDoc, doc, 
   increment, serverTimestamp, query, where, getDocs,
-  setDoc, orderBy
+  setDoc, orderBy, deleteDoc
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, SaleItem, Table, Sale, Expense } from '../types';
@@ -211,8 +211,11 @@ export const POSView: React.FC = () => {
   };
 
   const fetchReportData = async () => {
+    if (!reportRange.start || !reportRange.end) return;
+    
     try {
-      const start = new Date(reportRange.start);
+      // Usar formato local T00:00:00 para que coincida con la zona horaria del navegador
+      const start = new Date(reportRange.start + 'T00:00:00');
       const end = new Date(reportRange.end + 'T23:59:59');
       
       const salesQuery = query(collection(db, 'sales'), where('timestamp', '>=', start), where('timestamp', '<=', end));
@@ -247,42 +250,54 @@ export const POSView: React.FC = () => {
     
     Swal.fire({
       title: 'Importando Historial',
-      text: 'Por favor espere mientras procesamos los datos...',
+      html: '<p>Iniciando descarga y procesamiento...</p><div id="import-progress" class="mt-4 font-black text-blue-600 text-2xl">0</div>',
       allowOutsideClick: false,
       didOpen: () => {
         Swal.showLoading();
       }
     });
 
-    try {
-      const response = await fetch(csvUrl);
-      const csvText = await response.text();
-      
-      Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          const data = results.data as any[];
-          const batchId = `import_${Date.now()}`;
-          let count = 0;
-          const CHUNK_SIZE = 450; // Firestore batch limit is 500
+    const batchId = `import_${Date.now()}`;
+    let totalCount = 0;
+    const progressEl = document.getElementById('import-progress');
 
-          for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-            const chunk = data.slice(i, i + CHUNK_SIZE);
-            const batch = writeBatch(db);
+    Papa.parse(csvUrl, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      chunkSize: 1024 * 1024 * 2, // 2MB chunks
+      chunk: async (results, parser) => {
+        parser.pause(); // Pause to handle async batch commit
+        
+        const data = results.data as any[];
+        const batch = writeBatch(db);
+        let chunkProcessed = 0;
 
-            for (const row of chunk) {
-              if (!row.Fecha || !row.Hora) continue;
-              
-              // Parse date and time: 19/01/2026, 18:21:49
-              const [day, month, year] = row.Fecha.split('/');
-              const timestamp = new Date(`${year}-${month}-${day}T${row.Hora}`);
+        for (const row of data) {
+          if (!row.Fecha) continue;
+          
+          try {
+            const [day, month, year] = row.Fecha.split('/');
+            const timeParts = (row.Hora || '00:00:00').split(':').map(Number);
+            const timestamp = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), ...timeParts);
+            
+            const totalStr = (row['Total Venta'] || '0').toString().replace(/[^0-9-]/g, '');
+            const total = parseInt(totalStr) || 0;
 
-              // Parse products: "1 x Almuerzo con pollo ($17000), 1 x Lasagna ($30000)"
+            if (total < 0) {
+              // Es un gasto
+              const expenseRef = doc(collection(db, 'expenses'));
+              batch.set(expenseRef, {
+                concept: row.Productos || 'Gasto Importado',
+                category: 'Insumos',
+                amount: Math.abs(total),
+                timestamp,
+                importBatch: batchId
+              });
+            } else {
+              // Es una venta
               const productsStr = row.Productos || '';
               const items: SaleItem[] = [];
-              
-              // Regex to match "Quantity x Name ($Price)"
               const itemRegex = /(\d+)\s*x\s*([^($]+)\s*\(\$([\d.,]+)\)/g;
               let match;
               while ((match = itemRegex.exec(productsStr)) !== null) {
@@ -290,57 +305,53 @@ export const POSView: React.FC = () => {
                 const name = match[2].trim();
                 const priceStr = match[3].replace(/[^0-9]/g, '');
                 const price = parseInt(priceStr) || 0;
-                
-                // Try to find product ID by name
                 const product = products.find(p => p.name.toLowerCase() === name.toLowerCase());
-                
-                items.push({
-                  productId: product?.id || 'imported_item',
-                  name,
-                  price,
-                  quantity
-                });
+                items.push({ productId: product?.id || 'imported_item', name, price, quantity });
               }
 
-              const totalStr = (row['Total Venta'] || '0').toString().replace(/[^0-9]/g, '');
-              const saleData = {
+              const newSaleRef = doc(collection(db, 'sales'));
+              batch.set(newSaleRef, {
                 items,
-                total: parseInt(totalStr) || 0,
+                total,
                 paymentMethod: row['Método Pago'] || 'Efectivo',
                 timestamp,
                 clientName: row.Cliente || 'Mostrador',
                 table: row.Mesa || 'Mostrador',
                 importBatch: batchId
-              };
-
-              const newSaleRef = doc(collection(db, 'sales'));
-              batch.set(newSaleRef, saleData);
-              count++;
+              });
             }
-            await batch.commit();
+            chunkProcessed++;
+            totalCount++;
+          } catch (e) {
+            console.warn('Error procesando fila:', row, e);
           }
-
-          setLastImportBatch(batchId);
-          localStorage.setItem('lastImportBatch', batchId);
-          
-          Swal.fire({
-            icon: 'success',
-            title: 'Importación Exitosa',
-            text: `Se han importado ${count} ventas correctamente.`,
-          });
-          
-          if (showReportsModal) fetchReportData();
-          if (showHistoryModal) fetchHistoryData();
-        },
-        error: (error: any) => {
-          console.error('Error parsing CSV:', error);
-          Swal.fire('Error', 'No se pudo procesar el archivo CSV.', 'error');
         }
-      });
-    } catch (error) {
-      console.error('Error fetching CSV:', error);
-      Swal.fire('Error', 'No se pudo obtener el archivo de Google Sheets.', 'error');
-    }
+
+        if (chunkProcessed > 0) {
+          await batch.commit();
+          if (progressEl) progressEl.innerText = totalCount.toString();
+        }
+        
+        parser.resume();
+      },
+      complete: () => {
+        setLastImportBatch(batchId);
+        localStorage.setItem('lastImportBatch', batchId);
+        
+        Swal.fire({
+          icon: 'success',
+          title: 'Importación Exitosa',
+          text: `Se han importado ${totalCount} ventas correctamente.`,
+        });
+        
+        if (showReportsModal) fetchReportData();
+        if (showHistoryModal) fetchHistoryData();
+      },
+      error: (error: any) => {
+        console.error('Error parsing CSV:', error);
+        Swal.fire('Error', 'No se pudo procesar el archivo CSV.', 'error');
+      }
+    });
   };
 
   const undoLastImport = async () => {
@@ -379,6 +390,80 @@ export const POSView: React.FC = () => {
       } catch (error) {
         console.error('Error undoing import:', error);
         Swal.fire('Error', 'No se pudo deshacer la importación.', 'error');
+      }
+    }
+  };
+
+  const deleteSale = async (saleId: string) => {
+    const result = await Swal.fire({
+      title: '¿Eliminar Venta?',
+      text: 'Esta acción no se puede deshacer.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        await deleteDoc(doc(db, 'sales', saleId));
+        Swal.fire('Eliminado', 'La venta ha sido eliminada.', 'success');
+        fetchHistoryData();
+        if (showReportsModal) fetchReportData();
+      } catch (error) {
+        console.error('Error deleting sale:', error);
+        Swal.fire('Error', 'No se pudo eliminar la venta.', 'error');
+      }
+    }
+  };
+
+  const clearAllSales = async () => {
+    const result = await Swal.fire({
+      title: '¿BORRAR TODO EL HISTORIAL?',
+      text: 'Se eliminarán TODAS las ventas registradas. Esta acción es irreversible.',
+      icon: 'error',
+      showCancelButton: true,
+      confirmButtonText: 'SÍ, BORRAR TODO',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#d33'
+    });
+
+    if (result.isConfirmed) {
+      const secondConfirm = await Swal.fire({
+        title: '¿Estás seguro?',
+        text: 'Escribe "BORRAR" para confirmar la eliminación total.',
+        input: 'text',
+        inputValidator: (value) => {
+          if (value !== 'BORRAR') return 'Debes escribir BORRAR';
+          return null;
+        },
+        showCancelButton: true,
+        confirmButtonText: 'Confirmar eliminación total',
+        confirmButtonColor: '#d33'
+      });
+
+      if (secondConfirm.isConfirmed) {
+        Swal.fire({ title: 'Borrando historial...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        try {
+          const snap = await getDocs(collection(db, 'sales'));
+          const chunks = [];
+          for (let i = 0; i < snap.docs.length; i += 450) {
+            chunks.push(snap.docs.slice(i, i + 450));
+          }
+          
+          for (const chunk of chunks) {
+            const batch = writeBatch(db);
+            chunk.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+          }
+
+          Swal.fire('Historial Limpio', 'Se han eliminado todas las ventas.', 'success');
+          fetchHistoryData();
+          if (showReportsModal) fetchReportData();
+        } catch (error) {
+          console.error('Error clearing history:', error);
+          Swal.fire('Error', 'No se pudo limpiar el historial.', 'error');
+        }
       }
     }
   };
@@ -1053,16 +1138,6 @@ export const POSView: React.FC = () => {
                   <h3 className="text-xl font-black text-gray-800">Informe Financiero</h3>
                 </div>
                 <div className="flex items-center gap-2">
-                  {lastImportBatch && (
-                    <button onClick={undoLastImport} className="flex items-center gap-2 px-4 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-sm font-bold border border-orange-100 hover:bg-orange-100 transition">
-                      <RefreshCw className="w-4 h-4" />
-                      Deshacer
-                    </button>
-                  )}
-                  <button onClick={importSalesFromCSV} className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold border border-blue-100 hover:bg-blue-100 transition">
-                    <History className="w-4 h-4" />
-                    Importar
-                  </button>
                   <button onClick={printConsumptionReport} className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-sm font-bold border border-purple-100 hover:bg-purple-100 transition">
                     <LayoutGrid className="w-4 h-4" />
                     Items
@@ -1216,12 +1291,14 @@ export const POSView: React.FC = () => {
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
               <div className="p-8 border-b flex justify-between items-center bg-gray-50">
-                <h3 className="text-2xl font-black text-gray-800">Historial de Ventas</h3>
+                <div className="flex items-center gap-4">
+                  <h3 className="text-2xl font-black text-gray-800">Historial de Ventas</h3>
+                </div>
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-8">
                 <table className="w-full text-left">
-                  <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th></tr></thead>
+                  <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th><th className="pb-4 text-right">Acción</th></tr></thead>
                   <tbody className="divide-y">
                     {historyData.map(sale => (
                       <tr key={sale.id} className="hover:bg-gray-50 transition">
@@ -1230,6 +1307,11 @@ export const POSView: React.FC = () => {
                         <td className="py-4 text-sm font-medium">{sale.clientName}</td>
                         <td className="py-4 text-xs font-black uppercase text-gray-500">{sale.paymentMethod}</td>
                         <td className="py-4 text-right font-black text-gray-900">${sale.total.toLocaleString()}</td>
+                        <td className="py-4 text-right">
+                          <button onClick={() => deleteSale(sale.id)} className="p-2 text-gray-300 hover:text-red-600 transition">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
