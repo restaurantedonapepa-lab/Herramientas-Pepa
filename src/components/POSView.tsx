@@ -970,18 +970,16 @@ export const POSView: React.FC = () => {
                             timer: 2000, 
                             showConfirmButton: false 
                           });
-                        } else {
-                          Swal.fire({ 
-                            icon: 'error', 
-                            title: 'Error de Conexión', 
-                            text: 'No se pudo establecer conexión con la impresora.', 
-                            timer: 2000, 
-                            showConfirmButton: false 
-                          });
                         }
-                      } catch (err) {
+                      } catch (err: any) {
                         console.error(err);
                         setIsPrinterConnected(false);
+                        Swal.fire({ 
+                          icon: 'error', 
+                          title: 'Error de Conexión', 
+                          text: err.message || 'No se pudo establecer conexión con la impresora.',
+                          confirmButtonText: 'Entendido'
+                        });
                       }
                     }} 
                     className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"

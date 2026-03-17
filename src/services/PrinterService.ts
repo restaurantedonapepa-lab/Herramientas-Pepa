@@ -27,9 +27,18 @@ class PrinterService {
 
       await this.device.open();
       
+      // Intentar resetear el dispositivo para liberar bloqueos previos
+      try {
+        await this.device.reset();
+      } catch (e) {
+        console.warn('No se pudo resetear el dispositivo:', e);
+      }
+
       // Forzar configuración 1 si es posible
       try {
-        await this.device.selectConfiguration(1);
+        if (this.device.configuration === null || this.device.configuration.configurationValue !== 1) {
+          await this.device.selectConfiguration(1);
+        }
       } catch (e) {
         console.warn('Error seleccionando configuración:', e);
       }
@@ -50,7 +59,6 @@ class PrinterService {
       }
 
       if (targetInterface === -1) {
-        // Fallback: intentar con la primera interfaz y el primer endpoint de salida
         targetInterface = 0;
         const firstIface = interfaces[0];
         if (firstIface) {
@@ -66,16 +74,26 @@ class PrinterService {
       try {
         await this.device.claimInterface(targetInterface);
       } catch (e) {
-        console.warn('La interfaz ya podría estar reclamada:', e);
+        console.error('Error al reclamar interfaz:', e);
+        // Si falla el reclamo, intentamos continuar si ya estaba abierta
+        if (!this.device.opened) throw e;
       }
 
       (this.device as any)._targetEndpoint = targetEndpoint;
       (this.device as any)._targetInterface = targetInterface;
       
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error crítico al conectar impresora:', error);
-      return false;
+      
+      let message = 'No se pudo establecer conexión con la impresora.';
+      if (error.name === 'SecurityError') {
+        message = 'El sistema operativo bloqueó el acceso. Intenta desconectar y volver a conectar el USB.';
+      } else if (error.name === 'NetworkError') {
+        message = 'La impresora está ocupada por otro programa (ej. el driver de Windows).';
+      }
+      
+      throw new Error(message);
     }
   }
 
