@@ -11,7 +11,8 @@ import {
   Table as TableIcon, ShoppingCart, ArrowLeft, Plus, 
   Minus, MessageSquare, Edit2, Save, X, History, 
   ChartLine, RefreshCw, CheckCircle2, 
-  LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe
+  LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -21,6 +22,8 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell 
 } from 'recharts';
 import Swal from 'sweetalert2';
+import Papa from 'papaparse';
+import { writeBatch } from 'firebase/firestore';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -61,11 +64,14 @@ export const POSView: React.FC = () => {
     method3: 'Daviplata', val3: 0 
   });
   const [receivedAmount, setReceivedAmount] = useState<number>(0);
+  const isFirstPaymentKeyPress = useRef(true);
 
   // Report States
   const [reportRange, setReportRange] = useState({ start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+  const [reportTab, setReportTab] = useState<'ventas' | 'gastos' | 'graficos'>('ventas');
   const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
   const [historyData, setHistoryData] = useState<Sale[]>([]);
+  const [lastImportBatch, setLastImportBatch] = useState<string | null>(localStorage.getItem('lastImportBatch'));
 
   // Derived States
   const activeTable = useMemo(() => tables.find(t => t.id === activeTableId), [tables, activeTableId]);
@@ -236,18 +242,171 @@ export const POSView: React.FC = () => {
   useEffect(() => { if (showReportsModal) fetchReportData(); }, [showReportsModal, reportRange]);
   useEffect(() => { if (showHistoryModal) fetchHistoryData(); }, [showHistoryModal]);
 
+  const importSalesFromCSV = async () => {
+    const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRYxU0BBrkOIiAMI6IROxj0Nu8a7nHYjMbm3KEuYI3WdN_6Z5CXNuHxBquHLVgCAYtfsvRNszeyhyri/pub?gid=0&single=true&output=csv';
+    
+    Swal.fire({
+      title: 'Importando Historial',
+      text: 'Por favor espere mientras procesamos los datos...',
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      }
+    });
+
+    try {
+      const response = await fetch(csvUrl);
+      const csvText = await response.text();
+      
+      Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (results) => {
+          const data = results.data as any[];
+          const batch = writeBatch(db);
+          const batchId = `import_${Date.now()}`;
+          let count = 0;
+
+          for (const row of data) {
+            // Parse date and time: 19/01/2026, 18:21:49
+            const [day, month, year] = row.Fecha.split('/');
+            const timestamp = new Date(`${year}-${month}-${day}T${row.Hora}`);
+
+            // Parse products: "1 x Almuerzo con pollo ($17000), 1 x Lasagna ($30000)"
+            const productsStr = row.Productos;
+            const items: SaleItem[] = [];
+            
+            // Regex to match "Quantity x Name ($Price)"
+            const itemRegex = /(\d+)\s*x\s*([^($]+)\s*\(\$(\d+)\)/g;
+            let match;
+            while ((match = itemRegex.exec(productsStr)) !== null) {
+              const quantity = parseInt(match[1]);
+              const name = match[2].trim();
+              const price = parseInt(match[3]);
+              
+              // Try to find product ID by name
+              const product = products.find(p => p.name.toLowerCase() === name.toLowerCase());
+              
+              items.push({
+                productId: product?.id || 'imported_item',
+                name,
+                price,
+                quantity
+              });
+            }
+
+            const saleData = {
+              items,
+              total: parseInt(row['Total Venta']),
+              paymentMethod: row['Método Pago'],
+              timestamp,
+              clientName: row.Cliente,
+              table: row.Mesa,
+              importBatch: batchId
+            };
+
+            const newSaleRef = doc(collection(db, 'sales'));
+            batch.set(newSaleRef, saleData);
+            count++;
+          }
+
+          await batch.commit();
+          setLastImportBatch(batchId);
+          localStorage.setItem('lastImportBatch', batchId);
+          
+          Swal.fire({
+            icon: 'success',
+            title: 'Importación Exitosa',
+            text: `Se han importado ${count} ventas correctamente.`,
+          });
+          
+          if (showReportsModal) fetchReportData();
+          if (showHistoryModal) fetchHistoryData();
+        },
+        error: (error: any) => {
+          console.error('Error parsing CSV:', error);
+          Swal.fire('Error', 'No se pudo procesar el archivo CSV.', 'error');
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching CSV:', error);
+      Swal.fire('Error', 'No se pudo obtener el archivo de Google Sheets.', 'error');
+    }
+  };
+
+  const undoLastImport = async () => {
+    if (!lastImportBatch) return;
+
+    const result = await Swal.fire({
+      title: '¿Deshacer Importación?',
+      text: 'Se eliminarán todas las ventas de la última importación.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      Swal.fire({
+        title: 'Eliminando...',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+      });
+
+      try {
+        const q = query(collection(db, 'sales'), where('importBatch', '==', lastImportBatch));
+        const snap = await getDocs(q);
+        const batch = writeBatch(db);
+        
+        snap.docs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+
+        setLastImportBatch(null);
+        localStorage.removeItem('lastImportBatch');
+
+        Swal.fire('Eliminado', 'La importación ha sido deshecha.', 'success');
+        if (showReportsModal) fetchReportData();
+        if (showHistoryModal) fetchHistoryData();
+      } catch (error) {
+        console.error('Error undoing import:', error);
+        Swal.fire('Error', 'No se pudo deshacer la importación.', 'error');
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (showPaymentModal) {
+      isFirstPaymentKeyPress.current = true;
+    }
+  }, [showPaymentModal, paymentMethod]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (showPaymentModal && paymentMethod === 'Efectivo') {
-        if (e.key >= '0' && e.key <= '9') {
-          setReceivedAmount(prev => Number(prev.toString() + e.key));
+      if (showPaymentModal) {
+        if (e.key === 'Enter') {
+          const confirmBtn = document.querySelector('button[data-confirm-payment="true"]') as HTMLButtonElement;
+          if (confirmBtn && !confirmBtn.disabled) {
+            handlePayment();
+          }
           return;
-        } else if (e.key === 'Backspace') {
-          setReceivedAmount(prev => {
-            const s = prev.toString();
-            return s.length > 1 ? Number(s.slice(0, -1)) : 0;
-          });
-          return;
+        }
+
+        if (paymentMethod === 'Efectivo') {
+          if (e.key >= '0' && e.key <= '9') {
+            if (isFirstPaymentKeyPress.current) {
+              setReceivedAmount(Number(e.key));
+              isFirstPaymentKeyPress.current = false;
+            } else {
+              setReceivedAmount(prev => Number(prev.toString() + e.key));
+            }
+            return;
+          } else if (e.key === 'Backspace') {
+            setReceivedAmount(prev => {
+              const s = prev.toString();
+              return s.length > 1 ? Number(s.slice(0, -1)) : 0;
+            });
+            return;
+          }
         }
       }
 
@@ -270,18 +429,48 @@ export const POSView: React.FC = () => {
     const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
     
     const salesByCategory: Record<string, number> = {};
+    const salesByItem: Record<string, { name: string, quantity: number, total: number }> = {};
+    
     reportData.sales.forEach(sale => {
       sale.items.forEach(item => {
         const prod = products.find(p => p.id === item.productId);
         const cat = prod?.category || 'Otros';
         salesByCategory[cat] = (salesByCategory[cat] || 0) + (item.price * item.quantity);
+        
+        if (!salesByItem[item.productId]) {
+          salesByItem[item.productId] = { name: item.name, quantity: 0, total: 0 };
+        }
+        salesByItem[item.productId].quantity += item.quantity;
+        salesByItem[item.productId].total += (item.price * item.quantity);
       });
     });
 
-    const salesByMethod: Record<string, number> = {};
+    const salesByMethod: Record<string, number> = {
+      'Efectivo': 0,
+      'Nequi': 0,
+      'Tarjeta': 0,
+      'Daviplata': 0,
+      'QR': 0
+    };
+    
     reportData.sales.forEach(sale => {
       const method = sale.paymentMethod.split(':')[0].trim();
-      salesByMethod[method] = (salesByMethod[method] || 0) + sale.total;
+      if (method === 'Mixto') {
+        // Parse mixed payment string: "Mixto: Efectivo ($10.000), Nequi ($5.000)"
+        const parts = sale.paymentMethod.split(': ')[1].split(', ');
+        parts.forEach(p => {
+          const [m, vStr] = p.split(' ($');
+          const mName = m.trim();
+          const val = Number(vStr.replace(')', '').replace(/\./g, ''));
+          if (salesByMethod[mName] !== undefined) {
+            salesByMethod[mName] += val;
+          } else {
+            salesByMethod[mName] = (salesByMethod[mName] || 0) + val;
+          }
+        });
+      } else {
+        salesByMethod[method] = (salesByMethod[method] || 0) + sale.total;
+      }
     });
 
     return {
@@ -289,7 +478,9 @@ export const POSView: React.FC = () => {
       totalExpenses,
       balance: totalSales - totalExpenses,
       categoryData: Object.entries(salesByCategory).map(([name, value]) => ({ name, value })),
-      methodData: Object.entries(salesByMethod).map(([name, value]) => ({ name, value }))
+      methodData: Object.entries(salesByMethod).map(([name, value]) => ({ name, value })),
+      itemSales: Object.values(salesByItem).sort((a, b) => b.total - a.total),
+      salesByMethod
     };
   }, [reportData, products]);
 
@@ -379,12 +570,19 @@ export const POSView: React.FC = () => {
     const total = itemsToPay.reduce((sum, i) => sum + (i.price * i.quantity), 0);
 
     try {
+      let finalPaymentMethod = paymentMethod as string;
+      if (paymentMethod === 'Mixto') {
+        const methods = [];
+        if (mixedPayments.val1 > 0) methods.push(`${mixedPayments.method1} ($${mixedPayments.val1.toLocaleString()})`);
+        if (mixedPayments.val2 > 0) methods.push(`${mixedPayments.method2} ($${mixedPayments.val2.toLocaleString()})`);
+        if (mixedPayments.val3 > 0) methods.push(`${mixedPayments.method3} ($${mixedPayments.val3.toLocaleString()})`);
+        finalPaymentMethod = `Mixto: ${methods.join(', ')}`;
+      }
+
       await addDoc(collection(db, 'sales'), {
         items: itemsToPay,
         total,
-        paymentMethod: paymentMethod === 'Mixto' 
-          ? `${mixedPayments.method1}: ${mixedPayments.val1} | ${mixedPayments.method2}: ${mixedPayments.val2}`
-          : paymentMethod,
+        paymentMethod: finalPaymentMethod,
         clientName: activeTable.clientName || 'Mostrador',
         table: `Mesa ${activeTable.number}`,
         timestamp: serverTimestamp()
@@ -617,7 +815,26 @@ export const POSView: React.FC = () => {
                   {paymentMethod === 'Efectivo' ? (
                     <div className="grid grid-cols-3 gap-3 h-full">
                       {[7, 8, 9, 4, 5, 6, 1, 2, 3, 'C', 0, '00'].map(val => (
-                        <button key={val} onClick={() => { if (val === 'C') setReceivedAmount(0); else if (val === '00') setReceivedAmount(prev => Number(prev.toString() + '00')); else setReceivedAmount(prev => Number(prev.toString() + val.toString())); }} className="bg-gray-50 rounded-2xl font-black text-2xl text-gray-800 hover:bg-gray-100 transition">{val}</button>
+                        <button key={val} onClick={() => { 
+                          if (val === 'C') {
+                            setReceivedAmount(0);
+                            isFirstPaymentKeyPress.current = true;
+                          } else if (val === '00') {
+                            if (isFirstPaymentKeyPress.current) {
+                              setReceivedAmount(0);
+                              isFirstPaymentKeyPress.current = false;
+                            } else {
+                              setReceivedAmount(prev => Number(prev.toString() + '00'));
+                            }
+                          } else {
+                            if (isFirstPaymentKeyPress.current) {
+                              setReceivedAmount(Number(val));
+                              isFirstPaymentKeyPress.current = false;
+                            } else {
+                              setReceivedAmount(prev => Number(prev.toString() + val.toString()));
+                            }
+                          }
+                        }} className="bg-gray-50 rounded-2xl font-black text-2xl text-gray-800 hover:bg-gray-100 transition">{val}</button>
                       ))}
                     </div>
                   ) : paymentMethod === 'Mixto' ? (
@@ -673,7 +890,7 @@ export const POSView: React.FC = () => {
                     <div className="h-full flex flex-col items-center justify-center text-center text-gray-400"><CheckCircle2 className="w-16 h-16 mb-4 text-green-500" /><p className="font-black uppercase tracking-widest">Monto Asignado</p></div>
                   )}
                 </div>
-                <button onClick={handlePayment} disabled={receivedAmount < currentTotalToPay && paymentMethod !== 'Mixto'} className="mt-8 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all">CONFIRMAR PAGO</button>
+                <button onClick={handlePayment} data-confirm-payment="true" disabled={receivedAmount < currentTotalToPay && paymentMethod !== 'Mixto'} className="mt-8 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all">CONFIRMAR PAGO</button>
               </div>
             </motion.div>
           </div>
@@ -681,34 +898,167 @@ export const POSView: React.FC = () => {
 
         {showReportsModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="p-8 border-b flex justify-between items-center bg-gray-50">
-                <h3 className="text-2xl font-black text-gray-800">Informe Financiero</h3>
-                <div className="flex items-center gap-4">
-                  <input type="date" className="p-2 border rounded-xl font-bold" value={reportRange.start} onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} />
-                  <input type="date" className="p-2 border rounded-xl font-bold" value={reportRange.end} onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} />
-                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col border border-gray-200">
+              {/* Header */}
+              <div className="px-6 py-4 border-b flex justify-between items-center bg-white">
+                <div className="flex items-center gap-3">
+                  <ChartLine className="w-6 h-6 text-blue-600" />
+                  <h3 className="text-xl font-black text-gray-800">Informe Financiero</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  {lastImportBatch && (
+                    <button onClick={undoLastImport} className="flex items-center gap-2 px-4 py-1.5 bg-orange-50 text-orange-600 rounded-lg text-sm font-bold border border-orange-100 hover:bg-orange-100 transition">
+                      <RefreshCw className="w-4 h-4" />
+                      Deshacer
+                    </button>
+                  )}
+                  <button onClick={importSalesFromCSV} className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold border border-blue-100 hover:bg-blue-100 transition">
+                    <History className="w-4 h-4" />
+                    Importar
+                  </button>
+                  <button className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-sm font-bold border border-purple-100 hover:bg-purple-100 transition">
+                    <LayoutGrid className="w-4 h-4" />
+                    Items
+                  </button>
+                  <button className="flex items-center gap-2 px-4 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-100 hover:bg-red-100 transition">
+                    <FileText className="w-4 h-4" />
+                    PDF
+                  </button>
+                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+                    <X className="w-6 h-6 text-gray-400" />
+                  </button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-8 space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-green-50 p-6 rounded-3xl border border-green-100"><p className="text-xs font-black text-green-600 uppercase mb-2">Ventas Totales</p><p className="text-3xl font-black text-green-800">${reportStats.totalSales.toLocaleString()}</p></div>
-                  <div className="bg-red-50 p-6 rounded-3xl border border-red-100"><p className="text-xs font-black text-red-600 uppercase mb-2">Gastos Totales</p><p className="text-3xl font-black text-red-800">${reportStats.totalExpenses.toLocaleString()}</p></div>
-                  <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100"><p className="text-xs font-black text-blue-600 uppercase mb-2">Balance Neto</p><p className="text-3xl font-black text-blue-800">${reportStats.balance.toLocaleString()}</p></div>
+
+              {/* Date Filters */}
+              <div className="px-6 py-4 bg-gray-50 border-b flex items-center gap-3">
+                <div className="flex-1 flex items-center gap-3">
+                  <div className="flex-1 relative">
+                    <input type="date" className="w-full p-2.5 bg-white border rounded-lg font-bold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500" value={reportRange.start} onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} />
+                  </div>
+                  <div className="flex-1 relative">
+                    <input type="date" className="w-full p-2.5 bg-white border rounded-lg font-bold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500" value={reportRange.end} onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} />
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="bg-white p-6 rounded-3xl border h-[400px]">
-                    <h4 className="font-black text-gray-800 mb-6 uppercase tracking-widest text-sm">Ventas por Categoría</h4>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={reportStats.categoryData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="value" fill="#ef4444" radius={[4, 4, 0, 0]} /></BarChart>
-                    </ResponsiveContainer>
+                <button onClick={fetchReportData} className="p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm">
+                  <Search className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b bg-white">
+                {[
+                  { id: 'ventas', label: 'Ventas', icon: <ShoppingCart className="w-4 h-4" /> },
+                  { id: 'gastos', label: 'Gastos', icon: <Banknote className="w-4 h-4" /> },
+                  { id: 'graficos', label: 'Gráficos', icon: <ChartLine className="w-4 h-4" /> }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setReportTab(tab.id as any)}
+                    className={cn(
+                      "flex-1 py-4 flex items-center justify-center gap-2 font-black text-sm uppercase tracking-widest transition-all relative",
+                      reportTab === tab.id ? "text-blue-600" : "text-gray-400 hover:text-gray-600"
+                    )}
+                  >
+                    {tab.icon}
+                    {tab.label}
+                    {reportTab === tab.id && <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600" />}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6 bg-white">
+                {reportTab === 'ventas' && (
+                  <div className="space-y-6">
+                    {/* Payment Method Cards */}
+                    <div className="grid grid-cols-3 gap-4">
+                      {['Efectivo', 'Nequi', 'Tarjeta'].map(method => (
+                        <div key={method} className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-center">
+                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">{method}</p>
+                          <p className="text-xl font-black text-blue-600">${(reportStats.salesByMethod[method] || 0).toLocaleString()}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Sales Table */}
+                    <div className="border rounded-xl overflow-hidden">
+                      <table className="w-full text-left">
+                        <thead className="bg-gray-50 border-b">
+                          <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                            <th className="px-6 py-4">Plato</th>
+                            <th className="px-6 py-4 text-center">Cant.</th>
+                            <th className="px-6 py-4 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {reportStats.itemSales.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50 transition">
+                              <td className="px-6 py-4 text-sm font-bold text-gray-700">{item.name}</td>
+                              <td className="px-6 py-4 text-sm font-black text-center text-gray-900">{item.quantity}</td>
+                              <td className="px-6 py-4 text-sm font-bold text-right text-green-600">${item.total.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div className="bg-white p-6 rounded-3xl border h-[400px]">
-                    <h4 className="font-black text-gray-800 mb-6 uppercase tracking-widest text-sm">Métodos de Pago</h4>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart><Pie data={reportStats.methodData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" label>{reportStats.methodData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /></PieChart>
-                    </ResponsiveContainer>
+                )}
+
+                {reportTab === 'gastos' && (
+                  <div className="space-y-6">
+                    <div className="border rounded-xl overflow-hidden">
+                      <table className="w-full text-left">
+                        <thead className="bg-gray-50 border-b">
+                          <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                            <th className="px-6 py-4">Concepto</th>
+                            <th className="px-6 py-4">Categoría</th>
+                            <th className="px-6 py-4 text-right">Monto</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {reportData.expenses.map((expense) => (
+                            <tr key={expense.id} className="hover:bg-gray-50 transition">
+                              <td className="px-6 py-4 text-sm font-bold text-gray-700">{expense.concept}</td>
+                              <td className="px-6 py-4 text-sm font-medium text-gray-500">{expense.category}</td>
+                              <td className="px-6 py-4 text-sm font-bold text-right text-red-600">-${expense.amount.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
+                )}
+
+                {reportTab === 'graficos' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div className="bg-white p-6 rounded-3xl border h-[400px]">
+                      <h4 className="font-black text-gray-800 mb-6 uppercase tracking-widest text-sm">Ventas por Categoría</h4>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={reportStats.categoryData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} /></BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl border h-[400px]">
+                      <h4 className="font-black text-gray-800 mb-6 uppercase tracking-widest text-sm">Métodos de Pago</h4>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart><Pie data={reportStats.methodData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" label>{reportStats.methodData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /></PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-8 py-6 bg-gray-50 border-t">
+                <div className="flex justify-between items-center mb-4 text-sm font-bold">
+                  <div className="flex gap-8">
+                    <p className="text-gray-500">Ventas: <span className="text-green-600">${reportStats.totalSales.toLocaleString()}</span></p>
+                    <p className="text-gray-500">Gastos: <span className="text-red-600">-${reportStats.totalExpenses.toLocaleString()}</span></p>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <p className="text-lg font-black text-gray-800 uppercase tracking-widest">Balance Neto:</p>
+                  <p className="text-4xl font-black text-blue-600">${reportStats.balance.toLocaleString()}</p>
                 </div>
               </div>
             </motion.div>
