@@ -14,6 +14,7 @@ import {
   LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe,
   FileText, Settings
 } from 'lucide-react';
+import { printerService } from '../services/PrinterService';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -91,13 +92,32 @@ export const POSView: React.FC = () => {
 
   // ... (previous memos)
 
-  const printComanda = (type: 'customer' | 'kitchen' = 'customer') => {
+  const printComanda = async (type: 'customer' | 'kitchen' = 'customer') => {
     if (!activeTable) return;
 
     const total = activeTable.items.reduce((a, b) => a + (b.price * b.quantity), 0);
     const client = activeTable.clientName || 'Cliente';
     const dateStr = new Date().toLocaleString('es-CO');
 
+    // 1. INTENTAR IMPRESIÓN DIRECTA (USB)
+    if (printerService.isConnected()) {
+      try {
+        await printerService.printTicket({
+          businessName: 'DOÑA PEPA',
+          table: activeTable.number.toString(),
+          client: client,
+          items: activeTable.items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
+          total: total,
+          type: type
+        });
+        return; // Éxito, salir
+      } catch (error) {
+        console.error('Error en impresión USB:', error);
+        Swal.fire('Error Impresora', 'No se pudo imprimir por USB. Intentando impresión normal...', 'warning');
+      }
+    }
+
+    // 2. IMPRESIÓN NORMAL (FALLBACK)
     const htmlItems = activeTable.items.map(i => `
         <div style="display:flex; align-items:flex-start; margin-bottom:4px; font-size:12px;">
             <div style="white-space:nowrap; margin-right:5px; font-weight:bold;">${i.quantity} x</div>
@@ -108,7 +128,29 @@ export const POSView: React.FC = () => {
     `).join('');
 
     const printArea = document.getElementById('printable-area');
-    if (!printArea) return;
+    if (!printArea) {
+      // Si no existe el área, usar ventana emergente como último recurso
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) return;
+      printWindow.document.write(`
+        <html><body style="font-family:monospace; width:80mm; padding:10px;">
+          <h2 style="text-align:center;">DOÑA PEPA</h2>
+          <p style="text-align:center;">*** ${type === 'customer' ? 'CUENTA' : 'COMANDA'} ***</p>
+          <hr>
+          <p>Mesa: ${activeTable.number} - ${client}</p>
+          <p>${dateStr}</p>
+          <hr>
+          ${htmlItems}
+          <hr>
+          ${type === 'customer' ? `<h3 style="text-align:right;">TOTAL: $${total.toLocaleString('es-CO')}</h3>` : ''}
+        </body></html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+      return;
+    }
     
     printArea.innerHTML = `
         <div style="width: 100%; text-align: center; font-family: monospace; color:black;">
@@ -144,10 +186,9 @@ export const POSView: React.FC = () => {
         </div>
     `;
     
-    // Pequeño retraso para asegurar que el navegador renderice el contenido antes de abrir el diálogo
     setTimeout(() => {
       window.print();
-    }, 50);
+    }, 100);
   };
 
   // Sync Data
@@ -900,6 +941,20 @@ export const POSView: React.FC = () => {
                 <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
                 <div className="flex gap-2">
                   <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Historial"><History className="w-5 h-5 text-gray-600" /></button>
+                  <button 
+                    onClick={async () => {
+                      const connected = await printerService.requestDevice();
+                      if (connected) {
+                        Swal.fire({ icon: 'success', title: 'Impresora Conectada', text: 'La impresora USB está lista para usar.', timer: 2000, showConfirmButton: false });
+                        // Forzar re-render para actualizar icono
+                        setTables([...tables]);
+                      }
+                    }} 
+                    className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"
+                    title="Configurar Impresora USB"
+                  >
+                    <Printer className={`w-5 h-5 ${printerService.isConnected() ? 'text-green-600' : 'text-gray-400'}`} />
+                  </button>
                   <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Reportes"><ChartLine className="w-5 h-5 text-blue-600" /></button>
                   <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
                   <button onClick={() => setShowWebOrdersModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm relative">
