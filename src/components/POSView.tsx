@@ -25,6 +25,25 @@ import {
 import Swal from 'sweetalert2';
 import Papa from 'papaparse';
 import { writeBatch } from 'firebase/firestore';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+  rectSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -53,6 +72,7 @@ export const POSView: React.FC = () => {
   const [showWebOrdersModal, setShowWebOrdersModal] = useState(false);
   const [isPrinterConnected, setIsPrinterConnected] = useState(printerService.isConnected());
   const [webOrders, setWebOrders] = useState<any[]>([]);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
 
   // Detectar cambios en la conexión USB
   useEffect(() => {
@@ -92,7 +112,18 @@ export const POSView: React.FC = () => {
 
   // Derived States
   const activeTable = useMemo(() => tables.find(t => t.id === activeTableId), [tables, activeTableId]);
-  const categories = useMemo(() => ['all', ...new Set(products.map(p => p.category))], [products]);
+  const categories = useMemo(() => {
+    const uniqueCategories = [...new Set(products.map(p => p.category))];
+    const sorted = uniqueCategories.sort((a, b) => {
+      const indexA = categoryOrder.indexOf(a);
+      const indexB = categoryOrder.indexOf(b);
+      if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+    return ['all', ...sorted];
+  }, [products, categoryOrder]);
   const filteredProducts = useMemo(() => {
     let filtered = products.filter(p => p.active);
     if (searchTerm) {
@@ -107,6 +138,69 @@ export const POSView: React.FC = () => {
   }, [products, activeCategory, searchTerm]);
 
   // ... (previous memos)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = categories.indexOf(active.id as string);
+      const newIndex = categories.indexOf(over.id as string);
+      
+      const newOrder = arrayMove(categories, oldIndex, newIndex)
+        .filter(c => c !== 'all');
+      
+      setCategoryOrder(newOrder);
+      try {
+        await setDoc(doc(db, 'settings', 'category_order'), { order: newOrder });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'settings');
+      }
+    }
+  };
+
+  const SortableCategory = ({ cat, onClick }: { cat: string, onClick: () => void }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging
+    } = useSortable({ id: cat });
+
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      zIndex: isDragging ? 50 : 'auto',
+      opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+      <button
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        onClick={onClick}
+        className="aspect-square bg-white rounded-[32px] border-2 border-gray-100 shadow-sm hover:shadow-xl hover:border-red-200 transition-all flex flex-col items-center justify-center p-4 text-center group touch-none"
+      >
+        <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+          <UtensilsCrossed className="w-8 h-8 text-red-600" />
+        </div>
+        <span className="font-black text-xs uppercase tracking-widest text-gray-800">{cat}</span>
+      </button>
+    );
+  };
 
   const printComanda = async (type: 'customer' | 'kitchen' = 'customer') => {
     if (!activeTable) return;
@@ -213,6 +307,7 @@ export const POSView: React.FC = () => {
     let unsubIngredients: (() => void) | undefined;
     let unsubTables: (() => void) | undefined;
     let unsubWebOrders: (() => void) | undefined;
+    let unsubCategoryOrder: (() => void) | undefined;
 
     const unsubscribeAuth = auth.onAuthStateChanged((user) => {
       // Limpiar listeners anteriores si existen
@@ -220,12 +315,14 @@ export const POSView: React.FC = () => {
       if (unsubIngredients) unsubIngredients();
       if (unsubTables) unsubTables();
       if (unsubWebOrders) unsubWebOrders();
+      if (unsubCategoryOrder) unsubCategoryOrder();
 
       if (!user) {
         setProducts([]);
         setIngredients([]);
         setTables([]);
         setWebOrders([]);
+        setCategoryOrder([]);
         return;
       }
 
@@ -260,6 +357,12 @@ export const POSView: React.FC = () => {
           });
         }
       }, (err) => handleFirestoreError(err, OperationType.GET, 'web_orders'));
+
+      unsubCategoryOrder = onSnapshot(doc(db, 'settings', 'category_order'), (snapshot) => {
+        if (snapshot.exists()) {
+          setCategoryOrder(snapshot.data().order || []);
+        }
+      });
     });
 
     return () => {
@@ -268,6 +371,7 @@ export const POSView: React.FC = () => {
       if (unsubIngredients) unsubIngredients();
       if (unsubTables) unsubTables();
       if (unsubWebOrders) unsubWebOrders();
+      if (unsubCategoryOrder) unsubCategoryOrder();
     };
   }, []);
 
@@ -1036,7 +1140,18 @@ export const POSView: React.FC = () => {
             <motion.div key="menu" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="flex-1 flex flex-col min-h-0">
               <div className="p-6 bg-white border-b space-y-4 sticky top-0 z-10">
                 <div className="flex items-center gap-4">
-                  <button onClick={closeTable} className="p-2 bg-gray-50 border rounded-xl hover:bg-gray-100 transition"><ArrowLeft className="w-5 h-5 text-gray-600" /></button>
+                  <button 
+                    onClick={() => {
+                      if (activeCategory !== 'all') {
+                        setActiveCategory('all');
+                      } else {
+                        closeTable();
+                      }
+                    }} 
+                    className="p-2 bg-gray-50 border rounded-xl hover:bg-gray-100 transition"
+                  >
+                    <ArrowLeft className="w-5 h-5 text-gray-600" />
+                  </button>
                   <div className="flex-1 relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                     <input 
@@ -1052,20 +1167,26 @@ export const POSView: React.FC = () => {
               </div>
               <div className="flex-1 overflow-y-auto p-6">
                 {activeCategory === 'all' && !searchTerm ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {categories.filter(c => c !== 'all').map(cat => (
-                      <button
-                        key={cat}
-                        onClick={() => setActiveCategory(cat)}
-                        className="aspect-square bg-white rounded-[32px] border-2 border-gray-100 shadow-sm hover:shadow-xl hover:border-red-200 transition-all flex flex-col items-center justify-center p-4 text-center group"
-                      >
-                        <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                          <UtensilsCrossed className="w-8 h-8 text-red-600" />
-                        </div>
-                        <span className="font-black text-xs uppercase tracking-widest text-gray-800">{cat}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext
+                      items={categories.filter(c => c !== 'all')}
+                      strategy={rectSortingStrategy}
+                    >
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                        {categories.filter(c => c !== 'all').map(cat => (
+                          <SortableCategory 
+                            key={cat} 
+                            cat={cat} 
+                            onClick={() => setActiveCategory(cat)} 
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 content-start">
                     {filteredProducts.map(product => (
