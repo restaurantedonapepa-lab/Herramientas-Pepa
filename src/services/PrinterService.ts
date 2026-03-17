@@ -43,57 +43,58 @@ class PrinterService {
         console.warn('Error seleccionando configuración:', e);
       }
 
-      // Buscar la interfaz que tenga el endpoint de impresión (bulk out)
-      let targetInterface = -1;
-      let targetEndpoint = -1;
-
+      // Buscar todas las interfaces que tengan el endpoint de impresión (bulk out)
       const interfaces = this.device.configuration?.interfaces || [];
+      const candidates: { iface: number; endpoint: number }[] = [];
+
       for (const iface of interfaces) {
         const endpoints = iface.alternate.endpoints;
         const outEndpoint = endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
         if (outEndpoint) {
-          targetInterface = iface.interfaceNumber;
-          targetEndpoint = outEndpoint.endpointNumber;
+          candidates.push({
+            iface: iface.interfaceNumber,
+            endpoint: outEndpoint.endpointNumber
+          });
+        }
+      }
+
+      if (candidates.length === 0) {
+        throw new Error('No se encontró un canal de salida válido en la impresora.');
+      }
+
+      // Intentar reclamar cada interfaz candidata hasta que una funcione
+      let success = false;
+      let lastError = null;
+
+      for (const candidate of candidates) {
+        try {
+          await this.device.claimInterface(candidate.iface);
+          (this.device as any)._targetEndpoint = candidate.endpoint;
+          (this.device as any)._targetInterface = candidate.iface;
+          success = true;
           break;
+        } catch (e) {
+          lastError = e;
+          console.warn(`No se pudo reclamar la interfaz ${candidate.iface}, intentando la siguiente...`);
         }
       }
 
-      if (targetInterface === -1) {
-        targetInterface = 0;
-        const firstIface = interfaces[0];
-        if (firstIface) {
-          const outEndpoint = firstIface.alternate.endpoints.find(e => e.direction === 'out');
-          if (outEndpoint) targetEndpoint = outEndpoint.endpointNumber;
+      if (!success) {
+        if (lastError && (lastError as any).name === 'SecurityError') {
+          throw new Error('BLOQUEO_OS');
         }
+        throw lastError || new Error('No se pudo reclamar ninguna interfaz de la impresora.');
       }
-
-      if (targetEndpoint === -1) {
-        throw new Error('No se encontró un canal de salida válido en la impresora');
-      }
-
-      try {
-        await this.device.claimInterface(targetInterface);
-      } catch (e) {
-        console.error('Error al reclamar interfaz:', e);
-        // Si falla el reclamo, intentamos continuar si ya estaba abierta
-        if (!this.device.opened) throw e;
-      }
-
-      (this.device as any)._targetEndpoint = targetEndpoint;
-      (this.device as any)._targetInterface = targetInterface;
       
       return true;
     } catch (error: any) {
       console.error('Error crítico al conectar impresora:', error);
       
-      let message = 'No se pudo establecer conexión con la impresora.';
-      if (error.name === 'SecurityError') {
-        message = 'El sistema operativo bloqueó el acceso. Intenta desconectar y volver a conectar el USB.';
-      } else if (error.name === 'NetworkError') {
-        message = 'La impresora está ocupada por otro programa (ej. el driver de Windows).';
+      if (error.message === 'BLOQUEO_OS' || error.name === 'SecurityError') {
+        throw new Error('SISTEMA_BLOQUEADO');
       }
       
-      throw new Error(message);
+      throw error;
     }
   }
 

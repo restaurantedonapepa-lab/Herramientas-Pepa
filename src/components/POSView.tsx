@@ -974,12 +974,33 @@ export const POSView: React.FC = () => {
                       } catch (err: any) {
                         console.error(err);
                         setIsPrinterConnected(false);
-                        Swal.fire({ 
-                          icon: 'error', 
-                          title: 'Error de Conexión', 
-                          text: err.message || 'No se pudo establecer conexión con la impresora.',
-                          confirmButtonText: 'Entendido'
-                        });
+                        
+                        if (err.message === 'SISTEMA_BLOQUEADO') {
+                          Swal.fire({
+                            icon: 'warning',
+                            title: 'Sistema Bloqueado',
+                            html: `
+                              <div class="text-left text-sm">
+                                <p>Windows está bloqueando el acceso directo a la impresora porque tiene instalado un driver genérico.</p>
+                                <br/>
+                                <p><b>Para solucionarlo:</b></p>
+                                <ol class="list-decimal ml-5 mt-2">
+                                  <li>Desconecta y vuelve a conectar el USB.</li>
+                                  <li>Si sigue fallando, necesitas usar <b>Zadig</b> para cambiar el driver a "WinUSB".</li>
+                                  <li>O simplemente usa la <b>Impresión Normal</b> (el botón funcionará aunque el icono esté gris).</li>
+                                </ol>
+                              </div>
+                            `,
+                            confirmButtonText: 'Entendido'
+                          });
+                        } else {
+                          Swal.fire({ 
+                            icon: 'error', 
+                            title: 'Error de Conexión', 
+                            text: err.message || 'No se pudo establecer conexión con la impresora.',
+                            confirmButtonText: 'Entendido'
+                          });
+                        }
                       }
                     }} 
                     className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"
