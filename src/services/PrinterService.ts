@@ -27,13 +27,16 @@ class PrinterService {
 
       await this.device.open();
       
-      if (this.device.configuration === null) {
+      // Forzar configuración 1 si es posible
+      try {
         await this.device.selectConfiguration(1);
+      } catch (e) {
+        console.warn('Error seleccionando configuración:', e);
       }
 
       // Buscar la interfaz que tenga el endpoint de impresión (bulk out)
-      let targetInterface = 0;
-      let targetEndpoint = 0;
+      let targetInterface = -1;
+      let targetEndpoint = -1;
 
       const interfaces = this.device.configuration?.interfaces || [];
       for (const iface of interfaces) {
@@ -46,12 +49,32 @@ class PrinterService {
         }
       }
 
-      await this.device.claimInterface(targetInterface);
+      if (targetInterface === -1) {
+        // Fallback: intentar con la primera interfaz y el primer endpoint de salida
+        targetInterface = 0;
+        const firstIface = interfaces[0];
+        if (firstIface) {
+          const outEndpoint = firstIface.alternate.endpoints.find(e => e.direction === 'out');
+          if (outEndpoint) targetEndpoint = outEndpoint.endpointNumber;
+        }
+      }
+
+      if (targetEndpoint === -1) {
+        throw new Error('No se encontró un canal de salida válido en la impresora');
+      }
+
+      try {
+        await this.device.claimInterface(targetInterface);
+      } catch (e) {
+        console.warn('La interfaz ya podría estar reclamada:', e);
+      }
+
       (this.device as any)._targetEndpoint = targetEndpoint;
+      (this.device as any)._targetInterface = targetInterface;
       
       return true;
     } catch (error) {
-      console.error('Error al conectar impresora:', error);
+      console.error('Error crítico al conectar impresora:', error);
       return false;
     }
   }

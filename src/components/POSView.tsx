@@ -51,7 +51,23 @@ export const POSView: React.FC = () => {
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showWebOrdersModal, setShowWebOrdersModal] = useState(false);
+  const [isPrinterConnected, setIsPrinterConnected] = useState(printerService.isConnected());
   const [webOrders, setWebOrders] = useState<any[]>([]);
+
+  // Detectar cambios en la conexión USB
+  useEffect(() => {
+    const handleUsbChange = () => {
+      setIsPrinterConnected(printerService.isConnected());
+    };
+
+    navigator.usb?.addEventListener('connect', handleUsbChange);
+    navigator.usb?.addEventListener('disconnect', handleUsbChange);
+
+    return () => {
+      navigator.usb?.removeEventListener('connect', handleUsbChange);
+      navigator.usb?.removeEventListener('disconnect', handleUsbChange);
+    };
+  }, []);
   const [splitCount, setSplitCount] = useState<number>(1);
   const [isSplitting, setIsSplitting] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -100,7 +116,7 @@ export const POSView: React.FC = () => {
     const dateStr = new Date().toLocaleString('es-CO');
 
     // 1. INTENTAR IMPRESIÓN DIRECTA (USB)
-    if (printerService.isConnected()) {
+    if (isPrinterConnected && printerService.isConnected()) {
       try {
         await printerService.printTicket({
           businessName: 'DOÑA PEPA',
@@ -943,17 +959,35 @@ export const POSView: React.FC = () => {
                   <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Historial"><History className="w-5 h-5 text-gray-600" /></button>
                   <button 
                     onClick={async () => {
-                      const connected = await printerService.requestDevice();
-                      if (connected) {
-                        Swal.fire({ icon: 'success', title: 'Impresora Conectada', text: 'La impresora USB está lista para usar.', timer: 2000, showConfirmButton: false });
-                        // Forzar re-render para actualizar icono
-                        setTables([...tables]);
+                      try {
+                        const connected = await printerService.requestDevice();
+                        setIsPrinterConnected(connected);
+                        if (connected) {
+                          Swal.fire({ 
+                            icon: 'success', 
+                            title: 'Impresora Conectada', 
+                            text: 'La impresora USB está lista para usar.', 
+                            timer: 2000, 
+                            showConfirmButton: false 
+                          });
+                        } else {
+                          Swal.fire({ 
+                            icon: 'error', 
+                            title: 'Error de Conexión', 
+                            text: 'No se pudo establecer conexión con la impresora.', 
+                            timer: 2000, 
+                            showConfirmButton: false 
+                          });
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        setIsPrinterConnected(false);
                       }
                     }} 
                     className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"
                     title="Configurar Impresora USB"
                   >
-                    <Printer className={`w-5 h-5 ${printerService.isConnected() ? 'text-green-600' : 'text-gray-400'}`} />
+                    <Printer className={`w-5 h-5 ${isPrinterConnected ? 'text-green-600' : 'text-gray-400'}`} />
                   </button>
                   <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Reportes"><ChartLine className="w-5 h-5 text-blue-600" /></button>
                   <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
