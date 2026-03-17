@@ -12,8 +12,9 @@ import {
   Minus, MessageSquare, Edit2, Save, X, History, 
   ChartLine, RefreshCw, CheckCircle2, 
   LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe,
-  FileText
+  FileText, Settings
 } from 'lucide-react';
+import { printerService } from '../services/PrinterService';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -91,8 +92,25 @@ export const POSView: React.FC = () => {
 
   // ... (previous memos)
 
-  const printComanda = (type: 'customer' | 'kitchen' = 'customer') => {
+  const printComanda = async (type: 'customer' | 'kitchen' = 'customer') => {
     if (!activeTable) return;
+
+    // Intentar impresión directa si está conectada
+    if (printerService.isConnected()) {
+      try {
+        await printerService.printTicket({
+          businessName: 'Doña Pepa',
+          table: activeTable.number.toString(),
+          client: activeTable.clientName || 'Mostrador',
+          items: activeTable.items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
+          total: orderTotal
+        });
+        return; // Si imprimió por USB, no abrir ventana de impresión
+      } catch (error) {
+        console.error('Error en impresión USB, cayendo a impresión de ventana:', error);
+      }
+    }
+
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
@@ -234,7 +252,13 @@ export const POSView: React.FC = () => {
 
   const fetchHistoryData = async () => {
     try {
-      const q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const q = query(
+        collection(db, 'sales'), 
+        where('timestamp', '>=', today),
+        orderBy('timestamp', 'desc')
+      );
       const snap = await getDocs(q);
       setHistoryData(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)));
     } catch (error) {
@@ -877,8 +901,20 @@ export const POSView: React.FC = () => {
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><History className="w-5 h-5 text-gray-600" /></button>
-                  <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><ChartLine className="w-5 h-5 text-blue-600" /></button>
+                  <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Historial"><History className="w-5 h-5 text-gray-600" /></button>
+                  <button 
+                    onClick={async () => {
+                      const connected = await printerService.requestDevice();
+                      if (connected) {
+                        Swal.fire({ icon: 'success', title: 'Impresora Conectada', text: 'La impresora USB está lista para usar.', timer: 2000, showConfirmButton: false });
+                      }
+                    }} 
+                    className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"
+                    title="Configurar Impresora USB"
+                  >
+                    <Printer className={`w-5 h-5 ${printerService.isConnected() ? 'text-green-600' : 'text-gray-400'}`} />
+                  </button>
+                  <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Reportes"><ChartLine className="w-5 h-5 text-blue-600" /></button>
                   <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
                   <button onClick={() => setShowWebOrdersModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm relative">
                     <Globe className="w-5 h-5 text-orange-600" />
@@ -920,7 +956,7 @@ export const POSView: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
                 {activeCategory === 'all' && !searchTerm ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     {categories.filter(c => c !== 'all').map(cat => (
@@ -973,7 +1009,6 @@ export const POSView: React.FC = () => {
               {activeTable && (
                 <>
                   <button onClick={() => printComanda('kitchen')} className="p-2 text-orange-600 hover:bg-orange-50 rounded-xl transition" title="Comanda Cocina"><UtensilsCrossed className="w-5 h-5" /></button>
-                  <button onClick={() => printComanda('customer')} className="p-2 text-gray-600 hover:bg-gray-100 rounded-xl transition" title="Imprimir Cuenta"><Printer className="w-5 h-5" /></button>
                   <button onClick={async () => {
                     const { value: target } = await Swal.fire({ title: 'Mover Mesa', input: 'number', inputLabel: 'Número de mesa destino', showCancelButton: true });
                     if (target) moveTable(Number(target));
@@ -1018,7 +1053,25 @@ export const POSView: React.FC = () => {
             <div className="flex flex-col"><span className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Total a Pagar</span>{Object.keys(selectedItemsForPayment).length > 0 && <span className="text-xs font-bold text-red-500 uppercase mb-1">Selección Parcial</span>}</div>
             <span className="text-4xl font-black text-gray-900 tracking-tight">${currentTotalToPay.toLocaleString()}</span>
           </div>
-          <button disabled={!activeTable || activeTable.items.length === 0} onClick={() => { setReceivedAmount(currentTotalToPay); setShowPaymentModal(true); }} className={cn("w-full py-5 rounded-3xl font-black text-xl shadow-xl transition-all flex items-center justify-center gap-3", Object.keys(selectedItemsForPayment).length > 0 ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-100 disabled:text-gray-300 disabled:shadow-none")}>{Object.keys(selectedItemsForPayment).length > 0 ? <><Split className="w-6 h-6" /> COBRAR PARCIAL</> : <><CheckCircle2 className="w-6 h-6" /> COBRAR MESA</>}</button>
+          <div className="flex gap-3">
+            <button 
+              disabled={!activeTable || activeTable.items.length === 0} 
+              onClick={() => printComanda('customer')} 
+              className="flex-1 py-5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-3xl font-black text-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Printer className="w-6 h-6" />
+            </button>
+            <button 
+              disabled={!activeTable || activeTable.items.length === 0} 
+              onClick={() => { setReceivedAmount(currentTotalToPay); setShowPaymentModal(true); }} 
+              className={cn(
+                "flex-[3] py-5 rounded-3xl font-black text-xl shadow-xl transition-all flex items-center justify-center gap-3", 
+                Object.keys(selectedItemsForPayment).length > 0 ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-100 disabled:text-gray-300 disabled:shadow-none"
+              )}
+            >
+              {Object.keys(selectedItemsForPayment).length > 0 ? <><Split className="w-6 h-6" /> COBRAR PARCIAL</> : <><CheckCircle2 className="w-6 h-6" /> COBRAR MESA</>}
+            </button>
+          </div>
         </div>
       </div>
 

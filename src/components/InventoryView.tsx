@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
-import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles } from 'lucide-react';
+import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles, MoreVertical, FileSpreadsheet } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 export const InventoryView: React.FC = () => {
@@ -326,12 +326,12 @@ export const InventoryView: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex flex-1 max-w-md relative">
+        <div className="flex flex-1 max-w-2xl relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input 
             type="text" 
-            placeholder="Buscar en el inventario..."
-            className="w-full pl-12 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none font-medium shadow-sm"
+            placeholder={activeTab === 'ingredients' ? "Buscar insumos..." : "Buscar platos o categorías..."}
+            className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-medium shadow-sm transition-all"
             value={inventorySearch}
             onChange={(e) => setInventorySearch(e.target.value)}
           />
@@ -339,27 +339,35 @@ export const InventoryView: React.FC = () => {
 
         <div className="flex gap-2">
           {activeTab === 'products' && (
+            <div className="relative group">
+              <button className="p-3 bg-white border border-gray-200 rounded-2xl hover:bg-gray-50 transition shadow-sm">
+                <MoreVertical className="w-6 h-6 text-gray-600" />
+              </button>
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 py-2">
+                <button 
+                  onClick={handleCleanDuplicates}
+                  className="w-full px-4 py-3 text-left hover:bg-orange-50 text-orange-600 font-bold flex items-center gap-3 transition"
+                >
+                  <Sparkles className="w-4 h-4" /> Limpiar Duplicados
+                </button>
+                <button 
+                  onClick={handleImportFromSheets}
+                  disabled={isImporting}
+                  className="w-full px-4 py-3 text-left hover:bg-blue-50 text-blue-600 font-bold flex items-center gap-3 transition disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="w-4 h-4" /> {isImporting ? 'Importando...' : 'Importar desde Sheets'}
+                </button>
+              </div>
+            </div>
+          )}
+          {activeTab === 'ingredients' && (
             <button 
-              onClick={handleCleanDuplicates}
-              className="bg-white border border-orange-200 text-orange-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-orange-50 transition shadow-sm"
-              title="Eliminar platos repetidos"
+              onClick={() => { setEditingItem(null); setIsModalOpen(true); }}
+              className="bg-green-600 text-white px-6 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition shadow-md"
             >
-              <Sparkles className="w-4 h-4" /> Limpiar Duplicados
+              <Plus className="w-5 h-5" /> Nuevo Insumo
             </button>
           )}
-          <button 
-            onClick={handleImportFromSheets}
-            disabled={isImporting}
-            className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-gray-50 transition shadow-sm disabled:opacity-50"
-          >
-            {isImporting ? 'Importando...' : 'Importar desde Sheets'}
-          </button>
-          <button 
-            onClick={() => { setEditingItem(null); setIsModalOpen(true); }}
-            className="bg-green-600 text-white px-6 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-green-700 transition shadow-md"
-          >
-            <Plus className="w-5 h-5" /> Nuevo {activeTab === 'ingredients' ? 'Insumo' : 'Plato'}
-          </button>
         </div>
       </div>
 
@@ -442,6 +450,20 @@ export const InventoryView: React.FC = () => {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Floating Action Button for New Product */}
+      {activeTab === 'products' && (
+        <button
+          onClick={() => {
+            setEditingItem(null);
+            setIsModalOpen(true);
+          }}
+          className="fixed bottom-8 right-8 w-16 h-16 bg-red-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-red-700 hover:scale-110 active:scale-95 transition-all z-40 group"
+          title="Nuevo Plato"
+        >
+          <Plus className="w-8 h-8 group-hover:rotate-90 transition-transform duration-300" />
+        </button>
       )}
 
       {/* Modal Form */}

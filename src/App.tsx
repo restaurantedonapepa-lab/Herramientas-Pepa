@@ -168,6 +168,9 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const { userProfile } = useCart();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const isKiosk = queryParams.get('kiosk') === 'true';
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -191,9 +194,9 @@ function AppContent() {
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
       <GoogleOneTap />
-      <Navigation user={user} userProfile={userProfile} />
+      {!isKiosk && <Navigation user={user} userProfile={userProfile} />}
       <main className="flex-1 overflow-y-auto flex flex-col">
-        <Header />
+        {!isKiosk && <Header />}
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<CatalogView />} />
