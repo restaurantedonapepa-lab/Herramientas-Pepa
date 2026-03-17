@@ -14,7 +14,6 @@ import {
   LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe,
   FileText, Settings
 } from 'lucide-react';
-import { printerService } from '../services/PrinterService';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -92,64 +91,59 @@ export const POSView: React.FC = () => {
 
   // ... (previous memos)
 
-  const printComanda = async (type: 'customer' | 'kitchen' = 'customer') => {
+  const printComanda = (type: 'customer' | 'kitchen' = 'customer') => {
     if (!activeTable) return;
 
-    // Intentar impresión directa si está conectada
-    if (printerService.isConnected()) {
-      try {
-        await printerService.printTicket({
-          businessName: 'Doña Pepa',
-          table: activeTable.number.toString(),
-          client: activeTable.clientName || 'Mostrador',
-          items: activeTable.items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
-          total: orderTotal
-        });
-        return; // Si imprimió por USB, no abrir ventana de impresión
-      } catch (error) {
-        console.error('Error en impresión USB, cayendo a impresión de ventana:', error);
-      }
-    }
+    const total = activeTable.items.reduce((a, b) => a + (b.price * b.quantity), 0);
+    const client = activeTable.clientName || 'Cliente';
+    const dateStr = new Date().toLocaleString('es-CO');
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const itemsHtml = activeTable.items.map(item => `
-      <tr>
-        <td style="padding: 5px 0;">${item.quantity}x ${item.name}</td>
-        ${type === 'customer' ? `<td style="text-align: right;">$${(item.price * item.quantity).toLocaleString()}</td>` : ''}
-      </tr>
-      ${item.note ? `<tr><td colspan="2" style="font-size: 12px; color: #666; padding-bottom: 5px;">* ${item.note}</td></tr>` : ''}
+    const htmlItems = activeTable.items.map(i => `
+        <div style="display:flex; align-items:flex-start; margin-bottom:4px; font-size:12px;">
+            <div style="white-space:nowrap; margin-right:5px; font-weight:bold;">${i.quantity} x</div>
+            <div style="flex:1; text-align:left; padding-right:5px; line-height:1.2;">${i.name}</div>
+            ${type === 'customer' ? `<div style="white-space:nowrap; font-weight:bold;">$${(i.price * i.quantity).toLocaleString('es-CO')}</div>` : ''}
+        </div>
+        ${i.note ? `<div style="font-size: 10px; color: #666; margin-left: 25px; margin-bottom: 4px;">* ${i.note}</div>` : ''}
     `).join('');
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${type === 'customer' ? 'Cuenta' : 'Comanda'} - Mesa ${activeTable.number}</title>
-          <style>
-            body { font-family: 'Courier New', Courier, monospace; width: 80mm; padding: 5mm; margin: 0; }
-            h2 { text-align: center; margin: 0 0 10px 0; border-bottom: 1px dashed #000; padding-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; }
-            .total { border-top: 1px dashed #000; margin-top: 10px; padding-top: 10px; font-weight: bold; font-size: 18px; }
-            .footer { text-align: center; margin-top: 20px; font-size: 12px; }
-            .header-info { margin-bottom: 10px; font-size: 14px; }
-          </style>
-        </head>
-        <body>
-          <h2>${type === 'customer' ? 'CUENTA' : 'COMANDA COCINA'}</h2>
-          <div class="header-info">
-            <p><strong>Mesa: ${activeTable.number}</strong></p>
-            <p>Cliente: ${activeTable.clientName || 'Mostrador'}</p>
-            <p>Fecha: ${new Date().toLocaleString()}</p>
-          </div>
-          <table>${itemsHtml}</table>
-          ${type === 'customer' ? `<div class="total">TOTAL: $${orderTotal.toLocaleString()}</div>` : ''}
-          <div class="footer">Restaurante Doña Pepa<br>¡Gracias por su visita!</div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+    const printArea = document.getElementById('printable-area');
+    if (!printArea) return;
+    
+    printArea.innerHTML = `
+        <div style="width: 100%; text-align: center; font-family: monospace; color:black;">
+            <h2 style="margin:0; font-size:18px; font-weight:bold;">RESTAURANTE</h2>
+            <h2 style="margin:0; font-size:18px; font-weight:bold;">DOÑA PEPA</h2>
+            <p style="margin:0; font-size:14px; font-weight:bold;">*** ${type === 'customer' ? 'Nota de Pedido' : 'Comanda Cocina'} ***</p>
+            <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
+            
+            <div style="text-align:left; font-size:12px;">
+                <p style="margin: 2px 0;"><strong>Mesa:</strong> ${activeTable.number} - ${client}</p>
+                <p style="margin: 2px 0;">${dateStr}</p>
+            </div>
+            
+            <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
+            
+            <div style="text-align:left;">
+                ${htmlItems}
+            </div>
+            
+            <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
+            
+            ${type === 'customer' ? `
+            <div style="text-align:right; font-size:16px; font-weight:bold; margin-top:5px;">
+                <p style="margin: 0;">TOTAL: $${total.toLocaleString('es-CO')}</p>
+            </div>
+            ` : ''}
+            
+            <div style="margin-top:20px; font-size:11px;">
+                <p style="margin: 2px 0;">Gracias por su visita</p>
+                <p style="margin: 2px 0;">www.donapepacucuta.com</p>
+            </div>
+            <br>.
+        </div>
+    `;
+    window.print();
   };
 
   // Sync Data
@@ -902,18 +896,6 @@ export const POSView: React.FC = () => {
                 <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
                 <div className="flex gap-2">
                   <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Historial"><History className="w-5 h-5 text-gray-600" /></button>
-                  <button 
-                    onClick={async () => {
-                      const connected = await printerService.requestDevice();
-                      if (connected) {
-                        Swal.fire({ icon: 'success', title: 'Impresora Conectada', text: 'La impresora USB está lista para usar.', timer: 2000, showConfirmButton: false });
-                      }
-                    }} 
-                    className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"
-                    title="Configurar Impresora USB"
-                  >
-                    <Printer className={`w-5 h-5 ${printerService.isConnected() ? 'text-green-600' : 'text-gray-400'}`} />
-                  </button>
                   <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Reportes"><ChartLine className="w-5 h-5 text-blue-600" /></button>
                   <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
                   <button onClick={() => setShowWebOrdersModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm relative">
@@ -1478,6 +1460,7 @@ export const POSView: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+      <div id="printable-area" className="hidden"></div>
     </div>
   );
 };

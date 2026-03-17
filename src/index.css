@@ -15,3 +15,29 @@
   }
 }
 
+@media print {
+  @page {
+    margin: 0;
+    size: 80mm auto;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #printable-area, #printable-area * {
+    visibility: visible;
+  }
+  #printable-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    padding: 0;
+    margin: 0;
+    background: white;
+    color: black;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
