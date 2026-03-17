@@ -143,7 +143,11 @@ export const POSView: React.FC = () => {
             <br>.
         </div>
     `;
-    window.print();
+    
+    // Pequeño retraso para asegurar que el navegador renderice el contenido antes de abrir el diálogo
+    setTimeout(() => {
+      window.print();
+    }, 50);
   };
 
   // Sync Data
@@ -1460,7 +1464,6 @@ export const POSView: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
-      <div id="printable-area" className="hidden"></div>
     </div>
   );
 };

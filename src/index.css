@@ -20,24 +20,25 @@
     margin: 0;
     size: 80mm auto;
   }
-  body * {
-    visibility: hidden;
-  }
-  #printable-area, #printable-area * {
-    visibility: visible;
-  }
-  #printable-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 80mm;
-    padding: 0;
-    margin: 0;
-    background: white;
-    color: black;
-  }
-  .no-print {
+  
+  /* Ocultar el root de React por completo */
+  #root {
     display: none !important;
   }
+
+  /* Asegurar que el área de impresión sea visible */
+  #printable-area {
+    display: block !important;
+    width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+}
+
+/* Ocultar siempre en pantalla */
+#printable-area {
+  display: none;
 }
 
