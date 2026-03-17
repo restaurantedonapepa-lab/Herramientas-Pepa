@@ -263,54 +263,63 @@ export const POSView: React.FC = () => {
         skipEmptyLines: true,
         complete: async (results) => {
           const data = results.data as any[];
-          const batch = writeBatch(db);
           const batchId = `import_${Date.now()}`;
           let count = 0;
+          const CHUNK_SIZE = 450; // Firestore batch limit is 500
 
-          for (const row of data) {
-            // Parse date and time: 19/01/2026, 18:21:49
-            const [day, month, year] = row.Fecha.split('/');
-            const timestamp = new Date(`${year}-${month}-${day}T${row.Hora}`);
+          for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+            const chunk = data.slice(i, i + CHUNK_SIZE);
+            const batch = writeBatch(db);
 
-            // Parse products: "1 x Almuerzo con pollo ($17000), 1 x Lasagna ($30000)"
-            const productsStr = row.Productos;
-            const items: SaleItem[] = [];
-            
-            // Regex to match "Quantity x Name ($Price)"
-            const itemRegex = /(\d+)\s*x\s*([^($]+)\s*\(\$(\d+)\)/g;
-            let match;
-            while ((match = itemRegex.exec(productsStr)) !== null) {
-              const quantity = parseInt(match[1]);
-              const name = match[2].trim();
-              const price = parseInt(match[3]);
+            for (const row of chunk) {
+              if (!row.Fecha || !row.Hora) continue;
               
-              // Try to find product ID by name
-              const product = products.find(p => p.name.toLowerCase() === name.toLowerCase());
+              // Parse date and time: 19/01/2026, 18:21:49
+              const [day, month, year] = row.Fecha.split('/');
+              const timestamp = new Date(`${year}-${month}-${day}T${row.Hora}`);
+
+              // Parse products: "1 x Almuerzo con pollo ($17000), 1 x Lasagna ($30000)"
+              const productsStr = row.Productos || '';
+              const items: SaleItem[] = [];
               
-              items.push({
-                productId: product?.id || 'imported_item',
-                name,
-                price,
-                quantity
-              });
+              // Regex to match "Quantity x Name ($Price)"
+              const itemRegex = /(\d+)\s*x\s*([^($]+)\s*\(\$([\d.,]+)\)/g;
+              let match;
+              while ((match = itemRegex.exec(productsStr)) !== null) {
+                const quantity = parseInt(match[1]);
+                const name = match[2].trim();
+                const priceStr = match[3].replace(/[^0-9]/g, '');
+                const price = parseInt(priceStr) || 0;
+                
+                // Try to find product ID by name
+                const product = products.find(p => p.name.toLowerCase() === name.toLowerCase());
+                
+                items.push({
+                  productId: product?.id || 'imported_item',
+                  name,
+                  price,
+                  quantity
+                });
+              }
+
+              const totalStr = (row['Total Venta'] || '0').toString().replace(/[^0-9]/g, '');
+              const saleData = {
+                items,
+                total: parseInt(totalStr) || 0,
+                paymentMethod: row['Método Pago'] || 'Efectivo',
+                timestamp,
+                clientName: row.Cliente || 'Mostrador',
+                table: row.Mesa || 'Mostrador',
+                importBatch: batchId
+              };
+
+              const newSaleRef = doc(collection(db, 'sales'));
+              batch.set(newSaleRef, saleData);
+              count++;
             }
-
-            const saleData = {
-              items,
-              total: parseInt(row['Total Venta']),
-              paymentMethod: row['Método Pago'],
-              timestamp,
-              clientName: row.Cliente,
-              table: row.Mesa,
-              importBatch: batchId
-            };
-
-            const newSaleRef = doc(collection(db, 'sales'));
-            batch.set(newSaleRef, saleData);
-            count++;
+            await batch.commit();
           }
 
-          await batch.commit();
           setLastImportBatch(batchId);
           localStorage.setItem('lastImportBatch', batchId);
           
@@ -372,6 +381,144 @@ export const POSView: React.FC = () => {
         Swal.fire('Error', 'No se pudo deshacer la importación.', 'error');
       }
     }
+  };
+
+  const printConsumptionReport = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const itemsHtml = reportStats.itemSales.map(item => `
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${item.name}</td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Reporte de Consumo</title>
+          <style>
+            body { font-family: 'Helvetica', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+            .subtitle { font-size: 14px; color: #666; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th { text-align: left; border-bottom: 2px solid #000; padding-bottom: 10px; font-size: 14px; text-transform: uppercase; }
+            .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #999; border-top: 1px dashed #ccc; padding-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="title">REPORTE DE CONSUMO</div>
+            <div class="subtitle">(Cantidades vendidas - Sin precios)</div>
+            <div style="font-weight: bold;">Desde: ${reportRange.start} Hasta: ${reportRange.end}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th style="text-align: center;">Cant.</th>
+              </tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+          </table>
+          <div class="footer">--- Fin del Reporte ---</div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const printCashReport = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const expensesHtml = reportData.expenses.map(e => `
+      <tr>
+        <td style="padding: 5px 0;">${new Date(e.timestamp?.toDate()).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' })}</td>
+        <td style="padding: 5px 0;">${e.concept} (${e.category})</td>
+        <td style="padding: 5px 0; text-align: right; color: #ef4444;">-$${e.amount.toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const itemsHtml = reportStats.itemSales.map(item => `
+      <tr>
+        <td style="padding: 5px 0;">${item.name}</td>
+        <td style="padding: 5px 0; text-align: center;">${item.quantity}</td>
+        <td style="padding: 5px 0; text-align: right;">$${item.total.toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Reporte de Caja</title>
+          <style>
+            body { font-family: 'Helvetica', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; color: #333; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+            .business-name { font-size: 18px; margin-bottom: 5px; }
+            .dates { font-size: 14px; margin-bottom: 20px; }
+            .section-title { font-size: 14px; font-weight: bold; background: #f4f4f4; padding: 5px 10px; margin-top: 20px; border-bottom: 2px solid #000; }
+            .summary-row { display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; }
+            .summary-row.total { font-weight: bold; font-size: 16px; border-bottom: 2px solid #000; margin-top: 10px; }
+            .summary-row.balance { font-weight: bold; font-size: 20px; border-bottom: none; background: #f9f9f9; margin-top: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th { text-align: left; border-bottom: 1px solid #000; padding: 5px 0; font-size: 12px; }
+            td { font-size: 12px; }
+            .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #999; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="title">REPORTE DE CAJA</div>
+            <div class="business-name">Doña Pepa</div>
+            <div class="dates">Del: ${reportRange.start} Al: ${reportRange.end}</div>
+          </div>
+
+          <div class="section-title">RESUMEN</div>
+          <div class="summary-row"><span>Efectivo:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span></div>
+          <div class="summary-row"><span>Nequi:</span> <span>$${(reportStats.salesByMethod['Nequi'] || 0).toLocaleString()}</span></div>
+          <div class="summary-row"><span>Tarjeta:</span> <span>$${(reportStats.salesByMethod['Tarjeta'] || 0).toLocaleString()}</span></div>
+          <div class="summary-row total"><span>TOTAL VENTAS:</span> <span>$${reportStats.totalSales.toLocaleString()}</span></div>
+          <div class="summary-row" style="color: #ef4444;"><span>TOTAL GASTOS:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span></div>
+          <div class="summary-row balance"><span>BALANCE NETO:</span> <span>$${reportStats.balance.toLocaleString()}</span></div>
+
+          <div class="section-title">DETALLE DE GASTOS</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Concepto</th>
+                <th style="text-align: right;">Monto</th>
+              </tr>
+            </thead>
+            <tbody>${expensesHtml}</tbody>
+          </table>
+
+          <div class="section-title">DETALLE PRODUCTOS</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Plato</th>
+                <th style="text-align: center;">Cant.</th>
+                <th style="text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+          </table>
+
+          <div class="footer">
+            --- Fin del Reporte ---<br>
+            Generado: ${new Date().toLocaleString()}
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
   };
 
   useEffect(() => {
@@ -916,11 +1063,11 @@ export const POSView: React.FC = () => {
                     <History className="w-4 h-4" />
                     Importar
                   </button>
-                  <button className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-sm font-bold border border-purple-100 hover:bg-purple-100 transition">
+                  <button onClick={printConsumptionReport} className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-sm font-bold border border-purple-100 hover:bg-purple-100 transition">
                     <LayoutGrid className="w-4 h-4" />
                     Items
                   </button>
-                  <button className="flex items-center gap-2 px-4 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-100 hover:bg-red-100 transition">
+                  <button onClick={printCashReport} className="flex items-center gap-2 px-4 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-100 hover:bg-red-100 transition">
                     <FileText className="w-4 h-4" />
                     PDF
                   </button>
