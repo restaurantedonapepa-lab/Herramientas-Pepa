@@ -44,6 +44,7 @@ export interface Sale {
   clientName: string;
   table: string;
   status?: 'cancelled';
+  isCreditPayment?: boolean;
 }
 
 export interface SaleItem {
@@ -63,6 +64,7 @@ export interface Table {
   status: 'free' | 'busy';
   lastUpdate: any;
   isCredit?: boolean;
+  saleId?: string;
   shippingInfo?: {
     name: string;
     phone: string;

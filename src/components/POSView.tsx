@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, onSnapshot, addDoc, updateDoc, doc, 
   increment, serverTimestamp, query, where, getDocs,
-  setDoc, orderBy, deleteDoc, deleteField
+  setDoc, orderBy, deleteDoc, deleteField, getDoc
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, SaleItem, Table, Sale, Expense, BusinessSettings } from '../types';
@@ -119,7 +119,7 @@ export const POSView: React.FC = () => {
 
   // Report States
   const [reportRange, setReportRange] = useState({ start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
-  const [reportTab, setReportTab] = useState<'ventas' | 'gastos' | 'graficos'>('ventas');
+  const [reportTab, setReportTab] = useState<'ventas' | 'gastos' | 'graficos' | 'creditos'>('ventas');
   const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
   const [historyData, setHistoryData] = useState<Sale[]>([]);
   const [lastImportBatch, setLastImportBatch] = useState<string | null>(localStorage.getItem('lastImportBatch'));
@@ -756,8 +756,25 @@ export const POSView: React.FC = () => {
 
     if (result.isConfirmed) {
       try {
+        const saleSnap = await getDoc(doc(db, 'sales', saleId));
+        if (saleSnap.exists()) {
+          const saleData = saleSnap.data() as Sale;
+          // Devolver inventario (solo si no es un pago de crédito, ya que el crédito original es el que descuenta)
+          if (!saleData.isCreditPayment) {
+            for (const item of saleData.items) {
+              const product = products.find(p => p.id === item.productId);
+              if (product?.recipe) {
+                for (const recipeItem of product.recipe) {
+                  await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+                    stock: increment(recipeItem.quantity * item.quantity) 
+                  });
+                }
+              }
+            }
+          }
+        }
         await updateDoc(doc(db, 'sales', saleId), { status: 'cancelled' });
-        Swal.fire('Anulada', 'La venta ha sido anulada.', 'success');
+        Swal.fire('Anulada', 'La venta ha sido anulada e inventario devuelto.', 'success');
         fetchHistoryData();
         if (showReportsModal) fetchReportData();
       } catch (error) {
@@ -975,6 +992,14 @@ export const POSView: React.FC = () => {
       </tr>
     `).join('');
 
+    const creditsHtml = reportStats.creditSales.map(s => `
+      <tr>
+        <td style="padding: 5px 0;">${new Date(s.timestamp?.toDate()).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' })}</td>
+        <td style="padding: 5px 0;">${s.clientName}</td>
+        <td style="padding: 5px 0; text-align: right; color: #f59e0b;">$${s.total.toLocaleString()}</td>
+      </tr>
+    `).join('');
+
     printWindow.document.write(`
       <html>
         <head>
@@ -1034,6 +1059,20 @@ export const POSView: React.FC = () => {
             </thead>
             <tbody>${itemsHtml}</tbody>
           </table>
+
+          ${reportStats.creditSales.length > 0 ? `
+          <div class="section-title">DETALLE CRÉDITOS PENDIENTES</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th style="text-align: right;">Monto</th>
+              </tr>
+            </thead>
+            <tbody>${creditsHtml}</tbody>
+          </table>
+          ` : ''}
 
           <div class="footer">
             --- Fin del Reporte ---<br>
@@ -1106,6 +1145,7 @@ export const POSView: React.FC = () => {
     const salesByItem: Record<string, { name: string, quantity: number, total: number }> = {};
     
     activeSales.forEach(sale => {
+      if (sale.isCreditPayment) return;
       sale.items.forEach(item => {
         const prod = products.find(p => p.id === item.productId);
         const cat = prod?.category || 'Otros';
@@ -1156,7 +1196,8 @@ export const POSView: React.FC = () => {
       categoryData: Object.entries(salesByCategory).map(([name, value]) => ({ name, value })),
       methodData: Object.entries(salesByMethod).map(([name, value]) => ({ name, value })),
       itemSales: Object.values(salesByItem).sort((a, b) => b.total - a.total),
-      salesByMethod
+      salesByMethod,
+      creditSales: activeSales.filter(s => s.paymentMethod === 'Crédito')
     };
   }, [reportData, products]);
 
@@ -1275,7 +1316,8 @@ export const POSView: React.FC = () => {
         paymentMethod: finalPaymentMethod,
         clientName: activeTable.clientName || 'Mostrador',
         table: activeTable.isCredit ? `CREDITO ${activeTable.number}` : (activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`),
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        isCreditPayment: activeTable.isCredit || false
       });
 
       // Solo descontar inventario si NO es un pago de un crédito ya registrado
@@ -1361,7 +1403,7 @@ export const POSView: React.FC = () => {
     if (result.isConfirmed) {
       try {
         // 1. Registrar la venta como crédito
-        await addDoc(collection(db, 'sales'), {
+        const saleRef = await addDoc(collection(db, 'sales'), {
           items: activeTable.items,
           total: orderTotal,
           paymentMethod: 'Crédito',
@@ -1395,7 +1437,8 @@ export const POSView: React.FC = () => {
           clientName: activeTable.clientName,
           status: 'busy',
           lastUpdate: serverTimestamp(),
-          isCredit: true
+          isCredit: true,
+          saleId: saleRef.id
         });
 
         // 4. Limpiar la mesa original
@@ -1435,8 +1478,10 @@ export const POSView: React.FC = () => {
   const clearTable = async () => {
     if (!activeTableId || !activeTable) return;
     const result = await Swal.fire({
-      title: '¿Borrar pedido?',
-      text: 'Esta acción vaciará la mesa y no se puede deshacer.',
+      title: activeTable.isCredit ? '¿Eliminar Crédito?' : '¿Borrar pedido?',
+      text: activeTable.isCredit 
+        ? 'Se anulará el registro de crédito y se devolverá el inventario.' 
+        : 'Esta acción vaciará la mesa y no se puede deshacer.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
@@ -1446,20 +1491,44 @@ export const POSView: React.FC = () => {
     });
 
     if (result.isConfirmed) {
-      if (activeTable.number < 1) {
-        // Es un domicilio, borrar el documento
-        await deleteDoc(doc(db, 'tables', activeTableId));
-        setActiveTableId(null);
-      } else {
-        // Es una mesa normal, vaciarla
-        await updateDoc(doc(db, 'tables', activeTableId), {
-          items: [],
-          status: 'free',
-          clientName: '',
-          shippingInfo: deleteField()
-        });
+      try {
+        if (activeTable.isCredit) {
+          // 1. Devolver inventario
+          for (const item of activeTable.items) {
+            const product = products.find(p => p.id === item.productId);
+            if (product?.recipe) {
+              for (const recipeItem of product.recipe) {
+                await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+                  stock: increment(recipeItem.quantity * item.quantity) 
+                });
+              }
+            }
+          }
+          // 2. Anular la venta original si existe
+          if (activeTable.saleId) {
+            await updateDoc(doc(db, 'sales', activeTable.saleId), { status: 'cancelled' });
+          }
+          // 3. Borrar la mesa de crédito
+          await deleteDoc(doc(db, 'tables', activeTableId));
+          setActiveTableId(null);
+        } else if (activeTable.number < 1) {
+          // Es un domicilio, borrar el documento
+          await deleteDoc(doc(db, 'tables', activeTableId));
+          setActiveTableId(null);
+        } else {
+          // Es una mesa normal, vaciarla
+          await updateDoc(doc(db, 'tables', activeTableId), {
+            items: [],
+            status: 'free',
+            clientName: '',
+            shippingInfo: deleteField()
+          });
+        }
+        Swal.fire({ icon: 'success', title: 'Pedido borrado', timer: 1500, showConfirmButton: false });
+      } catch (error) {
+        console.error('Error clearing table:', error);
+        Swal.fire('Error', 'No se pudo borrar el pedido.', 'error');
       }
-      Swal.fire({ icon: 'success', title: 'Pedido borrado', timer: 1500, showConfirmButton: false });
     }
   };
 
@@ -1969,6 +2038,7 @@ export const POSView: React.FC = () => {
               <div className="flex border-b bg-white">
                 {[
                   { id: 'ventas', label: 'Ventas', icon: <ShoppingCart className="w-4 h-4" /> },
+                  { id: 'creditos', label: 'Créditos', icon: <CreditCard className="w-4 h-4" /> },
                   { id: 'gastos', label: 'Gastos', icon: <Banknote className="w-4 h-4" /> },
                   { id: 'graficos', label: 'Gráficos', icon: <ChartLine className="w-4 h-4" /> }
                 ].map(tab => (
@@ -2019,6 +2089,38 @@ export const POSView: React.FC = () => {
                               <td className="px-6 py-4 text-sm font-bold text-right text-green-600">${item.total.toLocaleString()}</td>
                             </tr>
                           ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {reportTab === 'creditos' && (
+                  <div className="space-y-6">
+                    <div className="border rounded-xl overflow-hidden">
+                      <table className="w-full text-left">
+                        <thead className="bg-gray-50 border-b">
+                          <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                            <th className="px-6 py-4">Fecha</th>
+                            <th className="px-6 py-4">Cliente</th>
+                            <th className="px-6 py-4 text-right">Monto</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {reportStats.creditSales.map((sale) => (
+                            <tr key={sale.id} className="hover:bg-gray-50 transition">
+                              <td className="px-6 py-4 text-sm font-medium text-gray-500">
+                                {new Date(sale.timestamp?.toDate()).toLocaleDateString('es-CO')}
+                              </td>
+                              <td className="px-6 py-4 text-sm font-bold text-gray-700">{sale.clientName}</td>
+                              <td className="px-6 py-4 text-sm font-bold text-right text-amber-600">${sale.total.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                          {reportStats.creditSales.length === 0 && (
+                            <tr>
+                              <td colSpan={3} className="px-6 py-12 text-center text-gray-400 italic">No hay créditos pendientes en este periodo</td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
