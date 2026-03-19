@@ -5,7 +5,7 @@ import {
   setDoc, orderBy, deleteDoc
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
-import { Product, Ingredient, SaleItem, Table, Sale, Expense } from '../types';
+import { Product, Ingredient, SaleItem, Table, Sale, Expense, BusinessSettings } from '../types';
 import { 
   Search, Trash2, CreditCard, Banknote, QrCode, User, 
   Table as TableIcon, ShoppingCart, ArrowLeft, Plus, 
@@ -25,6 +25,7 @@ import {
 import Swal from 'sweetalert2';
 import Papa from 'papaparse';
 import { writeBatch } from 'firebase/firestore';
+import { useCart } from '../context/CartContext';
 import {
   DndContext,
   closestCenter,
@@ -49,10 +50,10 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const TOTAL_TABLES = 40;
 const COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 export const POSView: React.FC = () => {
+  const { businessSettings, userProfile } = useCart();
   // Data States
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -69,9 +70,9 @@ export const POSView: React.FC = () => {
   const [showReportsModal, setShowReportsModal] = useState(false);
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [showWebOrdersModal, setShowWebOrdersModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [editingSettings, setEditingSettings] = useState<BusinessSettings | null>(null);
   const [isPrinterConnected, setIsPrinterConnected] = useState(printerService.isConnected());
-  const [webOrders, setWebOrders] = useState<any[]>([]);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [productOrder, setProductOrder] = useState<string[]>([]);
 
@@ -387,7 +388,6 @@ export const POSView: React.FC = () => {
     let unsubProducts: (() => void) | undefined;
     let unsubIngredients: (() => void) | undefined;
     let unsubTables: (() => void) | undefined;
-    let unsubWebOrders: (() => void) | undefined;
     let unsubCategoryOrder: (() => void) | undefined;
     let unsubProductOrder: (() => void) | undefined;
 
@@ -396,7 +396,6 @@ export const POSView: React.FC = () => {
       if (unsubProducts) unsubProducts();
       if (unsubIngredients) unsubIngredients();
       if (unsubTables) unsubTables();
-      if (unsubWebOrders) unsubWebOrders();
       if (unsubCategoryOrder) unsubCategoryOrder();
       if (unsubProductOrder) unsubProductOrder();
 
@@ -404,7 +403,6 @@ export const POSView: React.FC = () => {
         setProducts([]);
         setIngredients([]);
         setTables([]);
-        setWebOrders([]);
         setCategoryOrder([]);
         setProductOrder([]);
         return;
@@ -427,21 +425,6 @@ export const POSView: React.FC = () => {
         }
       }, (error) => handleFirestoreError(error, OperationType.GET, 'tables'));
 
-      unsubWebOrders = onSnapshot(query(collection(db, 'web_orders'), where('status', '==', 'pending')), (snapshot) => {
-        const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setWebOrders(orders);
-        if (snapshot.docChanges().some(change => change.type === 'added')) {
-          Swal.fire({
-            toast: true,
-            position: 'top-end',
-            icon: 'info',
-            title: '¡Nuevo Pedido Web!',
-            showConfirmButton: false,
-            timer: 3000
-          });
-        }
-      }, (err) => handleFirestoreError(err, OperationType.GET, 'web_orders'));
-
       unsubCategoryOrder = onSnapshot(doc(db, 'users', user.uid, 'settings', 'category_order'), (snapshot) => {
         if (snapshot.exists()) {
           setCategoryOrder(snapshot.data().order || []);
@@ -460,21 +443,37 @@ export const POSView: React.FC = () => {
       if (unsubProducts) unsubProducts();
       if (unsubIngredients) unsubIngredients();
       if (unsubTables) unsubTables();
-      if (unsubWebOrders) unsubWebOrders();
       if (unsubCategoryOrder) unsubCategoryOrder();
       if (unsubProductOrder) unsubProductOrder();
     };
   }, []);
 
   const initializeTables = async () => {
-    for (let i = 1; i <= TOTAL_TABLES; i++) {
-      await setDoc(doc(db, 'tables', `mesa-${i}`), {
+    const count = editingSettings?.tableCount || businessSettings?.tableCount || 40;
+    const batch = writeBatch(db);
+    for (let i = 1; i <= count; i++) {
+      const tableId = `table-${i}`;
+      batch.set(doc(db, 'tables', tableId), {
         number: i,
+        status: 'free',
         items: [],
         clientName: '',
-        status: 'free',
         lastUpdate: serverTimestamp()
       });
+    }
+    await batch.commit();
+    setShowSettingsModal(false);
+    Swal.fire({ icon: 'success', title: 'Mesas Inicializadas', text: `Se han creado ${count} mesas.` });
+  };
+
+  const saveBusinessSettings = async () => {
+    if (!editingSettings) return;
+    try {
+      await setDoc(doc(db, 'settings', 'business'), editingSettings);
+      setShowSettingsModal(false);
+      Swal.fire({ icon: 'success', title: 'Configuración Guardada', timer: 1500, showConfirmButton: false });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings');
     }
   };
 
@@ -1005,7 +1004,7 @@ export const POSView: React.FC = () => {
         }
       }
 
-      if (view === 'menu' && !showPaymentModal && !showReportsModal && !showExpensesModal && !showHistoryModal && !showWebOrdersModal) {
+      if (view === 'menu' && !showPaymentModal && !showReportsModal && !showExpensesModal && !showHistoryModal) {
         // If not typing in an input (except our search input)
         if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
           // If it's a letter, number or space
@@ -1017,7 +1016,7 @@ export const POSView: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [view, showPaymentModal, showReportsModal, showExpensesModal, showHistoryModal, showWebOrdersModal, paymentMethod]);
+  }, [view, showPaymentModal, showReportsModal, showExpensesModal, showHistoryModal, paymentMethod]);
 
   const reportStats = useMemo(() => {
     const activeSales = reportData.sales.filter(s => s.status !== 'cancelled');
@@ -1181,7 +1180,7 @@ export const POSView: React.FC = () => {
         total,
         paymentMethod: finalPaymentMethod,
         clientName: activeTable.clientName || 'Mostrador',
-        table: `Mesa ${activeTable.number}`,
+        table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`,
         timestamp: serverTimestamp()
       });
 
@@ -1199,9 +1198,22 @@ export const POSView: React.FC = () => {
           if (selectedItemsForPayment[item.productId]) return { ...item, quantity: item.quantity - selectedItemsForPayment[item.productId] };
           return item;
         }).filter(item => item.quantity > 0);
-        await updateDoc(doc(db, 'tables', activeTableId), { items: remainingItems, status: remainingItems.length > 0 ? 'busy' : 'free', clientName: remainingItems.length > 0 ? activeTable.clientName : '' });
+        
+        if (remainingItems.length === 0 && activeTable.number < 1) {
+          await deleteDoc(doc(db, 'tables', activeTableId));
+        } else {
+          await updateDoc(doc(db, 'tables', activeTableId), { 
+            items: remainingItems, 
+            status: remainingItems.length > 0 ? 'busy' : 'free', 
+            clientName: remainingItems.length > 0 ? activeTable.clientName : '' 
+          });
+        }
       } else {
-        await updateDoc(doc(db, 'tables', activeTableId), { items: [], status: 'free', clientName: '' });
+        if (activeTable.number < 1) {
+          await deleteDoc(doc(db, 'tables', activeTableId));
+        } else {
+          await updateDoc(doc(db, 'tables', activeTableId), { items: [], status: 'free', clientName: '' });
+        }
       }
 
       setShowPaymentModal(false);
@@ -1296,22 +1308,44 @@ export const POSView: React.FC = () => {
                   </button>
                   <button onClick={() => setShowReportsModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Reportes"><ChartLine className="w-5 h-5 text-blue-600" /></button>
                   <button onClick={() => setShowExpensesModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm"><Banknote className="w-5 h-5 text-red-600" /></button>
-                  <button onClick={() => setShowWebOrdersModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm relative">
-                    <Globe className="w-5 h-5 text-orange-600" />
-                    {webOrders.length > 0 && (
-                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-[8px] flex items-center justify-center rounded-full border-2 border-white animate-bounce">
-                        {webOrders.length}
-                      </span>
-                    )}
-                  </button>
+                  {userProfile?.role === 'admin' && (
+                    <button 
+                      onClick={() => {
+                        setEditingSettings(businessSettings);
+                        setShowSettingsModal(true);
+                      }} 
+                      className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" 
+                      title="Configuración del Negocio"
+                    >
+                      <Settings className="w-5 h-5 text-purple-600" />
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {tables.map(table => (
-                  <button key={table.id} onClick={() => openTable(table.id)} className={cn("aspect-square rounded-3xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md hover:-translate-y-1", table.status === 'busy' ? "bg-red-50 border-red-200 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-blue-200")}>
-                    <TableIcon className={cn("w-8 h-8", table.status === 'busy' ? "text-red-600" : "text-gray-200")} />
-                    <span className="font-black text-lg">MESA {table.number}</span>
-                    {table.status === 'busy' && <span className="text-xs font-bold bg-red-600 text-white px-2 py-0.5 rounded-full">${table.items.reduce((s, i) => s + (i.price * i.quantity), 0).toLocaleString()}</span>}
+                  <button 
+                    key={table.id} 
+                    onClick={() => openTable(table.id)} 
+                    className={cn(
+                      "aspect-square rounded-3xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 shadow-sm hover:shadow-md hover:-translate-y-1", 
+                      table.status === 'busy' 
+                        ? (table.number < 1 ? "bg-orange-50 border-orange-200 text-orange-800" : "bg-red-50 border-red-200 text-red-800") 
+                        : "bg-white border-gray-100 text-gray-400 hover:border-blue-200"
+                    )}
+                  >
+                    <TableIcon className={cn("w-8 h-8", table.status === 'busy' ? (table.number < 1 ? "text-orange-600" : "text-red-600") : "text-gray-200")} />
+                    <span className="font-black text-lg">
+                      {table.number < 1 ? `DOM ${Math.round(table.number * 100)}` : `MESA ${table.number}`}
+                    </span>
+                    {table.status === 'busy' && (
+                      <span className={cn(
+                        "text-xs font-bold text-white px-2 py-0.5 rounded-full",
+                        table.number < 1 ? "bg-orange-600" : "bg-red-600"
+                      )}>
+                        ${table.items.reduce((s, i) => s + (i.price * i.quantity), 0).toLocaleString()}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1486,7 +1520,6 @@ export const POSView: React.FC = () => {
               <div className="w-1/3 bg-gray-900 text-white p-10 flex flex-col">
                 <h3 className="text-xs font-black uppercase tracking-[0.2em] text-gray-500 mb-12">Resumen de Pago</h3>
                 <div className="space-y-8 flex-1">
-                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Total</p><p className="text-4xl font-black">${currentTotalToPay.toLocaleString()}</p></div>
                   <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Recibido</p><p className="text-4xl font-black text-blue-400">${(paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount).toLocaleString()}</p></div>
                   <div className="pt-8 border-t border-white/10"><p className="text-xs font-bold text-gray-500 uppercase mb-2">Cambio</p><p className={cn("text-5xl font-black", (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) >= currentTotalToPay ? "text-green-400" : "text-red-400")}>${Math.max(0, (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) - currentTotalToPay).toLocaleString()}</p></div>
                 </div>
@@ -1834,90 +1867,103 @@ export const POSView: React.FC = () => {
           </div>
         )}
 
-        {showWebOrdersModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[150] flex items-center justify-center p-4">
-            <div className="bg-gray-50 rounded-[40px] shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="p-8 bg-white border-b flex justify-between items-center">
-                <div>
-                  <h2 className="text-3xl font-black text-gray-900">Pedidos Web Pendientes</h2>
-                  <p className="text-gray-400 font-bold">Gestiona los pedidos recibidos desde el catálogo</p>
+        {showSettingsModal && editingSettings && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="p-8 border-b flex justify-between items-center bg-gray-50">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-purple-100 rounded-2xl">
+                    <Settings className="w-6 h-6 text-purple-600" />
+                  </div>
+                  <h3 className="text-2xl font-black text-gray-800">Configuración del Negocio</h3>
                 </div>
-                <button onClick={() => setShowWebOrdersModal(false)} className="p-3 hover:bg-gray-100 rounded-full transition">
-                  <X className="w-8 h-8 text-gray-400" />
-                </button>
+                <button onClick={() => setShowSettingsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
               </div>
               
-              <div className="flex-1 p-8 overflow-y-auto">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {webOrders.map(order => (
-                    <div key={order.id} className="bg-white p-6 rounded-[32px] shadow-sm border-2 border-gray-100 hover:border-red-100 transition-all">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <p className="text-xs font-black text-gray-400 uppercase">Cliente</p>
-                          <h3 className="text-xl font-black text-gray-900">{order.clientInfo.name}</h3>
-                          <p className="text-sm font-bold text-red-600">{order.clientInfo.phone}</p>
-                        </div>
-                        <span className="px-3 py-1 bg-orange-100 text-orange-600 text-[10px] font-black rounded-full uppercase">Pendiente</span>
-                      </div>
-                      
-                      <div className="space-y-2 mb-6">
-                        {order.items.map((item: any, idx: number) => (
-                          <div key={idx} className="flex justify-between text-sm font-bold text-gray-600">
-                            <span>{item.quantity}x {item.name}</span>
-                            <span>${(item.price * item.quantity).toLocaleString()}</span>
-                          </div>
-                        ))}
-                        <div className="pt-2 border-t flex justify-between font-black text-gray-900">
-                          <span>Total</span>
-                          <span>${order.total.toLocaleString()}</span>
-                        </div>
-                      </div>
-
-                      {order.clientInfo.address && (
-                        <div className="mb-4 p-3 bg-gray-50 rounded-xl">
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">Dirección</p>
-                          <p className="text-xs font-bold text-gray-700">{order.clientInfo.address}</p>
-                        </div>
-                      )}
-
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={async () => {
-                            try {
-                              await updateDoc(doc(db, 'web_orders', order.id), { status: 'completed' });
-                              Swal.fire('¡Completado!', 'El pedido ha sido marcado como completado.', 'success');
-                            } catch (error) {
-                              handleFirestoreError(error, OperationType.UPDATE, `web_orders/${order.id}`);
-                            }
-                          }}
-                          className="flex-1 py-3 bg-green-600 text-white font-black rounded-2xl hover:bg-green-700 transition"
-                        >
-                          COMPLETAR
-                        </button>
-                        <button 
-                          onClick={async () => {
-                            try {
-                              await updateDoc(doc(db, 'web_orders', order.id), { status: 'cancelled' });
-                            } catch (error) {
-                              handleFirestoreError(error, OperationType.UPDATE, `web_orders/${order.id}`);
-                            }
-                          }}
-                          className="px-4 py-3 bg-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-200 transition"
-                        >
-                          <X className="w-5 h-5" />
-                        </button>
-                      </div>
+              <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Nombre del Negocio</label>
+                    <input 
+                      type="text" 
+                      value={editingSettings.name} 
+                      onChange={(e) => setEditingSettings({...editingSettings, name: e.target.value})}
+                      className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-purple-500 outline-none font-bold"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">WhatsApp (Pedidos)</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. 573102456789"
+                      value={editingSettings.whatsapp} 
+                      onChange={(e) => setEditingSettings({...editingSettings, whatsapp: e.target.value})}
+                      className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-purple-500 outline-none font-bold"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Teléfono de Contacto</label>
+                    <input 
+                      type="text" 
+                      value={editingSettings.phone} 
+                      onChange={(e) => setEditingSettings({...editingSettings, phone: e.target.value})}
+                      className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-purple-500 outline-none font-bold"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Símbolo de Moneda</label>
+                    <input 
+                      type="text" 
+                      value={editingSettings.currencySymbol} 
+                      onChange={(e) => setEditingSettings({...editingSettings, currencySymbol: e.target.value})}
+                      className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-purple-500 outline-none font-bold"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Dirección</label>
+                    <input 
+                      type="text" 
+                      value={editingSettings.address} 
+                      onChange={(e) => setEditingSettings({...editingSettings, address: e.target.value})}
+                      className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-purple-500 outline-none font-bold"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest">Número de Mesas (TPV)</label>
+                    <div className="flex items-center gap-4">
+                      <input 
+                        type="number" 
+                        value={editingSettings.tableCount} 
+                        onChange={(e) => setEditingSettings({...editingSettings, tableCount: Number(e.target.value)})}
+                        className="flex-1 p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-purple-500 outline-none font-bold text-2xl text-center"
+                      />
+                      <button 
+                        onClick={initializeTables}
+                        className="px-6 py-4 bg-gray-100 text-gray-600 font-black rounded-2xl hover:bg-gray-200 transition text-sm"
+                      >
+                        REINICIALIZAR MESAS
+                      </button>
                     </div>
-                  ))}
-                  {webOrders.length === 0 && (
-                    <div className="col-span-full py-20 text-center">
-                      <Globe className="w-16 h-16 text-gray-200 mx-auto mb-4" />
-                      <p className="text-gray-400 font-black text-xl">No hay pedidos web pendientes</p>
-                    </div>
-                  )}
+                    <p className="text-[10px] text-gray-400 font-bold mt-1 uppercase tracking-wider">⚠️ REINICIALIZAR BORRARÁ EL ESTADO ACTUAL DE TODAS LAS MESAS</p>
+                  </div>
                 </div>
               </div>
-            </div>
+
+              <div className="p-8 bg-gray-50 border-t flex gap-4">
+                <button 
+                  onClick={() => setShowSettingsModal(false)}
+                  className="flex-1 py-4 bg-white border border-gray-200 text-gray-400 font-black rounded-2xl hover:bg-gray-100 transition"
+                >
+                  CANCELAR
+                </button>
+                <button 
+                  onClick={saveBusinessSettings}
+                  className="flex-1 py-4 bg-purple-600 text-white font-black rounded-2xl shadow-xl hover:bg-purple-700 transition"
+                >
+                  GUARDAR CAMBIOS
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>

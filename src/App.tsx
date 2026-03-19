@@ -9,6 +9,7 @@ import { InventoryView } from './components/InventoryView';
 import { UserManagementView } from './components/UserManagementView';
 import { ProductDetailView } from './components/ProductDetailView';
 import { Header } from './components/Header';
+import { CheckoutModal } from './components/CheckoutModal';
 import { GoogleOneTap } from './components/GoogleOneTap';
 import { CartProvider } from './context/CartContext';
 import { 
@@ -200,6 +201,7 @@ function AppContent() {
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
       <GoogleOneTap />
+      <CheckoutModal />
       {!isKiosk && <Navigation user={user} userProfile={userProfile} />}
       <main className={cn("flex-1 flex flex-col", location.pathname === '/pos' ? "overflow-hidden" : "overflow-y-auto")}>
         {!isKiosk && <Header />}

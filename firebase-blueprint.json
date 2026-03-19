@@ -75,6 +75,20 @@
         "lastUpdate": { "type": "string", "format": "date-time" }
       },
       "required": ["number", "status"]
+    },
+    "BusinessSettings": {
+      "title": "Configuración del Negocio",
+      "description": "Datos generales y parámetros del restaurante",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Nombre del negocio" },
+        "address": { "type": "string", "description": "Dirección física" },
+        "phone": { "type": "string", "description": "Teléfono de contacto" },
+        "whatsapp": { "type": "string", "description": "Número de WhatsApp para pedidos (con código de país)" },
+        "tableCount": { "type": "integer", "description": "Número total de mesas en el TPV" },
+        "currencySymbol": { "type": "string", "description": "Símbolo de moneda (e.g., $)" }
+      },
+      "required": ["name", "whatsapp", "tableCount"]
     }
   },
   "firestore": {
@@ -82,6 +96,7 @@
     "/ingredients/{ingredientId}": { "schema": "Ingredient", "description": "Inventario de insumos" },
     "/sales/{saleId}": { "schema": "Sale", "description": "Historial de ventas" },
     "/expenses/{expenseId}": { "schema": "Expense", "description": "Registro de gastos" },
-    "/tables/{tableId}": { "schema": "Table", "description": "Estado de las mesas" }
+    "/tables/{tableId}": { "schema": "Table", "description": "Estado de las mesas" },
+    "/settings/business": { "schema": "BusinessSettings", "description": "Configuración global del negocio" }
   }
 }

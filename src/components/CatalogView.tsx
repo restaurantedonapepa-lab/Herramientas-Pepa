@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, getDocs, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
-import { Product } from '../types';
+import { Product, Table } from '../types';
 import { useCart } from '../context/CartContext';
 import { 
   Search, ShoppingCart, Heart, Info, X, 
@@ -21,14 +21,12 @@ export const CatalogView: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showCart, setShowCart] = useState(false);
-  const [showCheckoutForm, setShowCheckoutForm] = useState(false);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [productOrder, setProductOrder] = useState<string[]>([]);
-  const [clientInfo, setClientInfo] = useState({ name: '', phone: '', address: '', notes: '' });
   const { 
     cart, addToCart, removeFromCart, updateQuantity, total, itemCount, 
-    clearCart, toggleFavorite, isFavorite, searchTerm, triggerFlyAnimation 
+    clearCart, toggleFavorite, isFavorite, searchTerm, triggerFlyAnimation,
+    setShowCheckoutForm
   } = useCart();
 
   useEffect(() => {
@@ -247,6 +245,7 @@ export const CatalogView: React.FC = () => {
           </div>
         )}
       </div>
+      {/* Floating Cart Button - Removed as Header has it */}
     </div>
   );
 };

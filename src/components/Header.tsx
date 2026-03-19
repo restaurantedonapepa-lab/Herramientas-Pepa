@@ -38,7 +38,7 @@ export const Header: React.FC = () => {
   const { 
     itemCount, favorites, cart, removeFromCart, updateQuantity, 
     total, toggleFavorite, searchTerm, setSearchTerm, animations,
-    userProfile 
+    userProfile, setShowCheckoutForm
   } = useCart();
   const [showCart, setShowCart] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
@@ -347,13 +347,12 @@ export const Header: React.FC = () => {
                     <span className="text-gray-400 font-black uppercase tracking-widest text-xs">Total a pagar</span>
                     <span className="text-3xl font-black text-gray-900">${total.toLocaleString()}</span>
                   </div>
-                  <Link 
-                    to="/" 
-                    onClick={() => { setShowCart(false); /* Trigger checkout logic if needed */ }}
+                  <button 
+                    onClick={() => { setShowCart(false); setShowCheckoutForm(true); }}
                     className="w-full py-5 bg-red-600 text-white font-black text-xl rounded-3xl shadow-xl shadow-red-200 hover:bg-red-700 transition block text-center"
                   >
                     FINALIZAR PEDIDO
-                  </Link>
+                  </button>
                 </div>
               )}
             </motion.div>

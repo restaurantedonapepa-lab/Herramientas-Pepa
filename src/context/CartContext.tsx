@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { SaleItem, Product } from '../types';
+import { SaleItem, Product, BusinessSettings } from '../types';
 import { auth, db } from '../firebase';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, getDocs, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import Swal from 'sweetalert2';
+import { Table } from '../types';
+import { handleFirestoreError, OperationType } from '../firebase';
 
 interface UserProfile {
   uid: string;
@@ -27,6 +30,10 @@ interface CartContextType {
   triggerFlyAnimation: (e: React.MouseEvent | { clientX: number, clientY: number }, imageUrl: string, target: 'cart' | 'favorites') => void;
   animations: FlyingAnimation[];
   userProfile: UserProfile | null;
+  businessSettings: BusinessSettings | null;
+  showCheckoutForm: boolean;
+  setShowCheckoutForm: (show: boolean) => void;
+  handleCheckout: (clientInfo: { name: string; phone: string; address: string; notes: string }) => Promise<void>;
 }
 
 export interface FlyingAnimation {
@@ -53,6 +60,29 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [searchTerm, setSearchTerm] = useState('');
   const [animations, setAnimations] = useState<FlyingAnimation[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
+  const [showCheckoutForm, setShowCheckoutForm] = useState(false);
+
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'business'), (snapshot) => {
+      if (snapshot.exists()) {
+        setBusinessSettings(snapshot.data() as BusinessSettings);
+      } else {
+        // Default settings if not exists
+        const defaults: BusinessSettings = {
+          name: 'Dona Pepa',
+          address: '',
+          phone: '',
+          whatsapp: '573102456789',
+          tableCount: 40,
+          currencySymbol: '$'
+        };
+        setBusinessSettings(defaults);
+        // We don't setDoc here to avoid permission issues for non-admins
+      }
+    });
+    return () => unsubSettings();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
@@ -165,12 +195,60 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
+  const handleCheckout = async (clientInfo: { name: string; phone: string; address: string; notes: string }) => {
+    if (!clientInfo.name || !clientInfo.phone || !clientInfo.address) {
+      Swal.fire({ icon: 'error', title: 'Datos incompletos', text: 'Por favor completa los datos de envío.' });
+      return;
+    }
+
+    try {
+      // Find the next Dom number
+      const tablesSnap = await getDocs(collection(db, 'tables'));
+      const domTables = tablesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Table))
+        .filter(t => t.number < 1);
+      
+      const nextDomIndex = domTables.length > 0 
+        ? Math.max(...domTables.map(t => Math.round(t.number * 100))) + 1 
+        : 1;
+      
+      const nextDomNumber = nextDomIndex / 100;
+
+      // Create the Dom table
+      const tableId = `dom-${nextDomIndex}`;
+      await setDoc(doc(db, 'tables', tableId), {
+        number: nextDomNumber,
+        items: cart,
+        clientName: clientInfo.name,
+        status: 'busy',
+        lastUpdate: serverTimestamp(),
+        shippingInfo: clientInfo
+      });
+
+      // Prepare WhatsApp message
+      const itemsList = cart.map(item => `${item.quantity}x ${item.name} ($${(item.price * item.quantity).toLocaleString()})`).join('\n');
+      const businessName = businessSettings?.name || 'DONA PEPA';
+      const message = `*NUEVO PEDIDO - ${businessName.toUpperCase()}*\n\n*Cliente:* ${clientInfo.name}\n*Teléfono:* ${clientInfo.phone}\n*Dirección:* ${clientInfo.address}\n*Notas:* ${clientInfo.notes || 'N/A'}\n\n*Pedido:*\n${itemsList}\n\n*TOTAL: $${total.toLocaleString()}*`;
+      
+      const whatsappNumber = businessSettings?.whatsapp || '573102456789';
+      const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
+
+      clearCart();
+      setShowCheckoutForm(false);
+      
+      Swal.fire({ icon: 'success', title: 'Pedido Enviado', text: 'Tu pedido ha sido enviado por WhatsApp y registrado en el sistema.' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'tables');
+    }
+  };
+
   return (
     <CartContext.Provider value={{ 
       cart, favorites, addToCart, removeFromCart, updateQuantity, 
       clearCart, toggleFavorite, isFavorite, total, itemCount,
       searchTerm, setSearchTerm, triggerFlyAnimation, animations,
-      userProfile
+      userProfile, businessSettings, showCheckoutForm, setShowCheckoutForm, handleCheckout
     }}>
       {children}
     </CartContext.Provider>

@@ -68,3 +68,12 @@ export interface Expense {
   amount: number;
   timestamp: any;
 }
+
+export interface BusinessSettings {
+  name: string;
+  address: string;
+  phone: string;
+  whatsapp: string;
+  tableCount: number;
+  currencySymbol: string;
+}
