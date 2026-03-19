@@ -59,6 +59,12 @@ export interface Table {
   clientName: string;
   status: 'free' | 'busy';
   lastUpdate: any;
+  shippingInfo?: {
+    name: string;
+    phone: string;
+    address: string;
+    notes: string;
+  };
 }
 
 export interface Expense {

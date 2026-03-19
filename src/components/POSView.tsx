@@ -52,6 +52,15 @@ function cn(...inputs: ClassValue[]) {
 
 const COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
+const defaultSettings: BusinessSettings = {
+  name: 'RESTAURANTE DOÑA PEPA',
+  address: 'Cúcuta, Norte de Santander',
+  phone: '310 123 4567',
+  whatsapp: '573102456789',
+  tableCount: 40,
+  currencySymbol: '$'
+};
+
 export const POSView: React.FC = () => {
   const { businessSettings, userProfile } = useCart();
   // Data States
@@ -290,17 +299,23 @@ export const POSView: React.FC = () => {
     const total = activeTable.items.reduce((a, b) => a + (b.price * b.quantity), 0);
     const client = activeTable.clientName || 'Cliente';
     const dateStr = new Date().toLocaleString('es-CO');
+    const businessName = businessSettings?.name || 'DOÑA PEPA';
 
     // 1. INTENTAR IMPRESIÓN DIRECTA (USB)
     if (isPrinterConnected && printerService.isConnected()) {
       try {
         await printerService.printTicket({
-          businessName: 'DOÑA PEPA',
-          table: activeTable.number.toString(),
+          businessName: businessName,
+          table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : activeTable.number.toString(),
           client: client,
           items: activeTable.items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
           total: total,
-          type: type
+          type: type,
+          shippingInfo: activeTable.shippingInfo ? {
+            phone: activeTable.shippingInfo.phone,
+            address: activeTable.shippingInfo.address,
+            notes: activeTable.shippingInfo.notes
+          } : undefined
         });
         return; // Éxito, salir
       } catch (error) {
@@ -326,11 +341,19 @@ export const POSView: React.FC = () => {
       if (!printWindow) return;
       printWindow.document.write(`
         <html><body style="font-family:monospace; width:80mm; padding:10px;">
-          <h2 style="text-align:center;">DOÑA PEPA</h2>
+          <h2 style="text-align:center;">${businessName}</h2>
           <p style="text-align:center;">*** ${type === 'customer' ? 'CUENTA' : 'COMANDA'} ***</p>
           <hr>
-          <p>Mesa: ${activeTable.number} - ${client}</p>
+          <p>Mesa: ${activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `MESA ${activeTable.number}`} - ${client}</p>
           <p>${dateStr}</p>
+          ${activeTable.shippingInfo ? `
+          <div style="margin-top: 10px; padding: 5px; border: 1px dashed black;">
+              <p style="margin: 2px 0;"><strong>DOMICILIO:</strong></p>
+              <p style="margin: 2px 0;"><strong>Tel:</strong> ${activeTable.shippingInfo.phone}</p>
+              <p style="margin: 2px 0;"><strong>Dir:</strong> ${activeTable.shippingInfo.address}</p>
+              ${activeTable.shippingInfo.notes ? `<p style="margin: 2px 0;"><strong>Notas:</strong> ${activeTable.shippingInfo.notes}</p>` : ''}
+          </div>
+          ` : ''}
           <hr>
           ${htmlItems}
           <hr>
@@ -346,14 +369,21 @@ export const POSView: React.FC = () => {
     
     printArea.innerHTML = `
         <div style="width: 100%; text-align: center; font-family: monospace; color:black;">
-            <h2 style="margin:0; font-size:18px; font-weight:bold;">RESTAURANTE</h2>
-            <h2 style="margin:0; font-size:18px; font-weight:bold;">DOÑA PEPA</h2>
+            <h2 style="margin:0; font-size:18px; font-weight:bold;">${businessName}</h2>
             <p style="margin:0; font-size:14px; font-weight:bold;">*** ${type === 'customer' ? 'Nota de Pedido' : 'Comanda Cocina'} ***</p>
             <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
             
             <div style="text-align:left; font-size:12px;">
-                <p style="margin: 2px 0;"><strong>Mesa:</strong> ${activeTable.number} - ${client}</p>
+                <p style="margin: 2px 0;"><strong>Mesa:</strong> ${activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `MESA ${activeTable.number}`} - ${client}</p>
                 <p style="margin: 2px 0;">${dateStr}</p>
+                ${activeTable.shippingInfo ? `
+                <div style="margin-top: 10px; padding: 5px; border: 1px dashed black;">
+                    <p style="margin: 2px 0;"><strong>DOMICILIO:</strong></p>
+                    <p style="margin: 2px 0;"><strong>Tel:</strong> ${activeTable.shippingInfo.phone}</p>
+                    <p style="margin: 2px 0;"><strong>Dir:</strong> ${activeTable.shippingInfo.address}</p>
+                    ${activeTable.shippingInfo.notes ? `<p style="margin: 2px 0;"><strong>Notas:</strong> ${activeTable.shippingInfo.notes}</p>` : ''}
+                </div>
+                ` : ''}
             </div>
             
             <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
@@ -372,7 +402,7 @@ export const POSView: React.FC = () => {
             
             <div style="margin-top:20px; font-size:11px;">
                 <p style="margin: 2px 0;">Gracias por su visita</p>
-                <p style="margin: 2px 0;">www.donapepacucuta.com</p>
+                <p style="margin: 2px 0;">${businessSettings?.address || 'www.donapepacucuta.com'}</p>
             </div>
             <br>.
         </div>
@@ -1311,7 +1341,7 @@ export const POSView: React.FC = () => {
                   {userProfile?.role === 'admin' && (
                     <button 
                       onClick={() => {
-                        setEditingSettings(businessSettings);
+                        setEditingSettings(businessSettings || defaultSettings);
                         setShowSettingsModal(true);
                       }} 
                       className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" 
@@ -1338,6 +1368,11 @@ export const POSView: React.FC = () => {
                     <span className="font-black text-lg">
                       {table.number < 1 ? `DOM ${Math.round(table.number * 100)}` : `MESA ${table.number}`}
                     </span>
+                    {table.clientName && (
+                      <span className="text-[10px] font-bold uppercase truncate max-w-[80%] opacity-70">
+                        {table.clientName}
+                      </span>
+                    )}
                     {table.status === 'busy' && (
                       <span className={cn(
                         "text-xs font-bold text-white px-2 py-0.5 rounded-full",

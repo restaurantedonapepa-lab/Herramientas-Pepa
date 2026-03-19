@@ -7,6 +7,11 @@ export interface TicketData {
   items: { name: string; quantity: number; price: number }[];
   total: number;
   type?: 'customer' | 'kitchen';
+  shippingInfo?: {
+    phone: string;
+    address: string;
+    notes: string;
+  };
 }
 
 class PrinterService {
@@ -124,6 +129,19 @@ class PrinterService {
       .line(`Cliente: ${data.client}`)
       .line(`Fecha: ${new Date().toLocaleString('es-CO')}`)
       .line('--------------------------------');
+
+    if (data.shippingInfo) {
+      result = result
+        .bold(true)
+        .line('DOMICILIO:')
+        .bold(false)
+        .line(`Tel: ${data.shippingInfo.phone}`)
+        .line(`Dir: ${data.shippingInfo.address}`);
+      if (data.shippingInfo.notes) {
+        result = result.line(`Notas: ${data.shippingInfo.notes}`);
+      }
+      result = result.line('--------------------------------');
+    }
 
     data.items.forEach(item => {
       const qtyStr = `${item.quantity} x `.padEnd(6);
