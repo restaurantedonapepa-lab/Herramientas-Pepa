@@ -62,6 +62,7 @@ export interface Table {
   clientName: string;
   status: 'free' | 'busy';
   lastUpdate: any;
+  isCredit?: boolean;
   shippingInfo?: {
     name: string;
     phone: string;

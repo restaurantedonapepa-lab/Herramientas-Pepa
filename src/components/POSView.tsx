@@ -488,7 +488,17 @@ export const POSView: React.FC = () => {
         if (tablesData.length === 0) {
           initializeTables();
         } else {
-          setTables(tablesData.sort((a, b) => a.number - b.number));
+          setTables(tablesData.sort((a, b) => {
+            const getType = (t: Table) => {
+              if (t.isCredit) return 1;
+              if (t.number < 1) return 2;
+              return 0;
+            };
+            const typeA = getType(a);
+            const typeB = getType(b);
+            if (typeA !== typeB) return typeA - typeB;
+            return a.number - b.number;
+          }));
         }
       }, (error) => handleFirestoreError(error, OperationType.GET, 'tables'));
 
@@ -996,9 +1006,10 @@ export const POSView: React.FC = () => {
           <div class="summary-row"><span>Efectivo:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span></div>
           <div class="summary-row"><span>Nequi:</span> <span>$${(reportStats.salesByMethod['Nequi'] || 0).toLocaleString()}</span></div>
           <div class="summary-row"><span>Tarjeta:</span> <span>$${(reportStats.salesByMethod['Tarjeta'] || 0).toLocaleString()}</span></div>
-          <div class="summary-row total"><span>TOTAL VENTAS:</span> <span>$${reportStats.totalSales.toLocaleString()}</span></div>
+          <div class="summary-row total"><span>TOTAL VENTAS (CAJA):</span> <span>$${reportStats.totalSales.toLocaleString()}</span></div>
+          <div class="summary-row" style="color: #f59e0b;"><span>TOTAL CRÉDITOS:</span> <span>$${reportStats.totalCredits.toLocaleString()}</span></div>
           <div class="summary-row" style="color: #ef4444;"><span>TOTAL GASTOS:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span></div>
-          <div class="summary-row balance"><span>BALANCE NETO:</span> <span>$${reportStats.balance.toLocaleString()}</span></div>
+          <div class="summary-row balance"><span>BALANCE NETO (CAJA):</span> <span>$${reportStats.balance.toLocaleString()}</span></div>
 
           <div class="section-title">DETALLE DE GASTOS</div>
           <table>
@@ -1087,7 +1098,8 @@ export const POSView: React.FC = () => {
 
   const reportStats = useMemo(() => {
     const activeSales = reportData.sales.filter(s => s.status !== 'cancelled');
-    const totalSales = activeSales.reduce((sum, s) => sum + s.total, 0);
+    const totalSales = activeSales.filter(s => s.paymentMethod !== 'Crédito').reduce((sum, s) => sum + s.total, 0);
+    const totalCredits = activeSales.filter(s => s.paymentMethod === 'Crédito').reduce((sum, s) => sum + s.total, 0);
     const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
     
     const salesByCategory: Record<string, number> = {};
@@ -1112,7 +1124,8 @@ export const POSView: React.FC = () => {
       'Nequi': 0,
       'Tarjeta': 0,
       'Daviplata': 0,
-      'QR': 0
+      'QR': 0,
+      'Crédito': 0
     };
     
     activeSales.forEach(sale => {
@@ -1137,6 +1150,7 @@ export const POSView: React.FC = () => {
 
     return {
       totalSales,
+      totalCredits,
       totalExpenses,
       balance: totalSales - totalExpenses,
       categoryData: Object.entries(salesByCategory).map(([name, value]) => ({ name, value })),
@@ -1184,7 +1198,7 @@ export const POSView: React.FC = () => {
   const addToOrder = async (product: Product) => {
     if (!activeTableId || !activeTable) return;
     
-    const isDelivery = activeTable.number < 1;
+    const isDelivery = activeTable.number < 1 && !activeTable.isCredit;
     const itemPrice = isDelivery ? (product.price + (product.packagingPrice || 0)) : product.price;
 
     const newItems = [...activeTable.items];
@@ -1260,18 +1274,21 @@ export const POSView: React.FC = () => {
         total,
         paymentMethod: finalPaymentMethod,
         clientName: activeTable.clientName || 'Mostrador',
-        table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`,
+        table: activeTable.isCredit ? `CREDITO ${activeTable.number}` : (activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`),
         timestamp: serverTimestamp()
       });
 
-      for (const item of itemsToPay) {
-        const product = products.find(p => p.id === item.productId);
-        // Deduct regular recipe
-        if (product?.recipe) {
-          for (const recipeItem of product.recipe) {
-            await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
-              stock: increment(-(recipeItem.quantity * item.quantity)) 
-            });
+      // Solo descontar inventario si NO es un pago de un crédito ya registrado
+      if (!activeTable.isCredit) {
+        for (const item of itemsToPay) {
+          const product = products.find(p => p.id === item.productId);
+          // Deduct regular recipe
+          if (product?.recipe) {
+            for (const recipeItem of product.recipe) {
+              await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+                stock: increment(-(recipeItem.quantity * item.quantity)) 
+              });
+            }
           }
         }
       }
@@ -1282,7 +1299,7 @@ export const POSView: React.FC = () => {
           return item;
         }).filter(item => item.quantity > 0);
         
-        if (remainingItems.length === 0 && activeTable.number < 1) {
+        if (remainingItems.length === 0 && (activeTable.number < 1 || activeTable.isCredit)) {
           await deleteDoc(doc(db, 'tables', activeTableId));
         } else {
           await updateDoc(doc(db, 'tables', activeTableId), { 
@@ -1292,7 +1309,7 @@ export const POSView: React.FC = () => {
           });
         }
       } else {
-        if (activeTable.number < 1) {
+        if (activeTable.number < 1 || activeTable.isCredit) {
           await deleteDoc(doc(db, 'tables', activeTableId));
         } else {
           await updateDoc(doc(db, 'tables', activeTableId), { items: [], status: 'free', clientName: '' });
@@ -1305,6 +1322,94 @@ export const POSView: React.FC = () => {
       Swal.fire({ icon: 'success', title: 'Venta Registrada', timer: 1500, showConfirmButton: false });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'sales');
+    }
+  };
+
+  const sendToCredit = async () => {
+    if (!activeTableId || !activeTable) return;
+    if (activeTable.items.length === 0) {
+      Swal.fire({ icon: 'error', title: 'Mesa Vacía', text: 'No hay productos para enviar a crédito.' });
+      return;
+    }
+
+    if (!activeTable.clientName) {
+      const { value: name } = await Swal.fire({
+        title: 'Nombre del Cliente',
+        input: 'text',
+        inputLabel: 'Ingrese el nombre para el crédito',
+        showCancelButton: true,
+        inputValidator: (value) => {
+          if (!value) return '¡Debe ingresar un nombre!';
+          return null;
+        }
+      });
+      if (!name) return;
+      await updateDoc(doc(db, 'tables', activeTableId), { clientName: name });
+      activeTable.clientName = name;
+    }
+
+    const result = await Swal.fire({
+      title: '¿Enviar a Crédito?',
+      text: `Se registrará la venta como crédito y se descontará del inventario.`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonColor: '#f59e0b',
+      confirmButtonText: 'Sí, enviar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      try {
+        // 1. Registrar la venta como crédito
+        await addDoc(collection(db, 'sales'), {
+          items: activeTable.items,
+          total: orderTotal,
+          paymentMethod: 'Crédito',
+          clientName: activeTable.clientName,
+          table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`,
+          timestamp: serverTimestamp()
+        });
+
+        // 2. Descontar inventario
+        for (const item of activeTable.items) {
+          const product = products.find(p => p.id === item.productId);
+          if (product?.recipe) {
+            for (const recipeItem of product.recipe) {
+              await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+                stock: increment(-(recipeItem.quantity * item.quantity)) 
+              });
+            }
+          }
+        }
+
+        // 3. Crear el registro de crédito persistente
+        const creditTables = tables.filter(t => t.isCredit);
+        const nextCreditNumber = creditTables.length > 0 
+          ? Math.max(...creditTables.map(t => t.number)) + 1 
+          : 1;
+        
+        const creditId = `credit-${Date.now()}`;
+        await setDoc(doc(db, 'tables', creditId), {
+          number: nextCreditNumber,
+          items: activeTable.items,
+          clientName: activeTable.clientName,
+          status: 'busy',
+          lastUpdate: serverTimestamp(),
+          isCredit: true
+        });
+
+        // 4. Limpiar la mesa original
+        if (activeTable.number < 1) {
+          await deleteDoc(doc(db, 'tables', activeTableId));
+        } else {
+          await updateDoc(doc(db, 'tables', activeTableId), { items: [], status: 'free', clientName: '' });
+        }
+
+        setActiveTableId(creditId);
+        Swal.fire({ icon: 'success', title: 'Enviado a Crédito', timer: 1500, showConfirmButton: false });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'sales');
+      }
     }
   };
 
@@ -1462,19 +1567,19 @@ export const POSView: React.FC = () => {
                         : "bg-white border-gray-100 text-gray-400 hover:border-blue-200"
                     )}
                   >
-                    <TableIcon className={cn("w-8 h-8", table.status === 'busy' ? (table.number < 1 ? "text-orange-600" : "text-red-600") : "text-gray-200")} />
+                    <TableIcon className={cn("w-8 h-8", table.status === 'busy' ? (table.isCredit ? "text-amber-600" : (table.number < 1 ? "text-orange-600" : "text-red-600")) : "text-gray-200")} />
                     <span className="font-black text-lg">
-                      {table.number < 1 ? `DOM ${Math.round(table.number * 100)}` : `MESA ${table.number}`}
+                      {table.isCredit ? `CREDITO ${table.number}` : (table.number < 1 ? `DOM ${Math.round(table.number * 100)}` : `MESA ${table.number}`)}
                     </span>
                     {table.clientName && (
                       <span className="text-[10px] font-bold uppercase truncate max-w-[80%] opacity-70">
                         {table.clientName}
                       </span>
                     )}
-                    {table.status === 'busy' && (
+                      {table.status === 'busy' && (
                       <span className={cn(
                         "text-xs font-bold text-white px-2 py-0.5 rounded-full",
-                        table.number < 1 ? "bg-orange-600" : "bg-red-600"
+                        table.isCredit ? "bg-amber-600" : (table.number < 1 ? "bg-orange-600" : "bg-red-600")
                       )}>
                         ${table.items.reduce((s, i) => s + (i.price * i.quantity), 0).toLocaleString()}
                       </span>
@@ -1577,10 +1682,16 @@ export const POSView: React.FC = () => {
       )}>
         <div className="p-6 border-b bg-gray-50/50 shrink-0">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-red-600" />{activeTable ? `Mesa ${activeTable.number}` : 'Seleccione Mesa'}</h2>
+            <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
+              <ShoppingCart className="w-6 h-6 text-red-600" />
+              {activeTable ? (activeTable.isCredit ? `Crédito ${activeTable.number}` : (activeTable.number < 1 ? `Dom ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`)) : 'Seleccione Mesa'}
+            </h2>
             <div className="flex gap-1">
               {activeTable && (
                 <>
+                  {!activeTable.isCredit && (
+                    <button onClick={sendToCredit} className="p-2 text-amber-600 hover:bg-amber-50 rounded-xl transition" title="Enviar a Crédito"><CreditCard className="w-5 h-5" /></button>
+                  )}
                   <button onClick={() => printComanda('kitchen')} className="p-2 text-orange-600 hover:bg-orange-50 rounded-xl transition" title="Comanda Cocina"><UtensilsCrossed className="w-5 h-5" /></button>
                   <button onClick={async () => {
                     const { value: target } = await Swal.fire({ title: 'Mover Mesa', input: 'number', inputLabel: 'Número de mesa destino', showCancelButton: true });
@@ -1696,7 +1807,7 @@ export const POSView: React.FC = () => {
               <div className="flex-1 p-6 lg:p-10 flex flex-col overflow-hidden">
                 <div className="flex justify-between items-center mb-4 lg:mb-8 flex-shrink-0"><h3 className="text-xl lg:text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
                 <div className="grid grid-cols-3 gap-3 mb-8 flex-shrink-0">
-                  {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
+                  {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Crédito', 'Mixto'].map(m => (
                     <button key={m} onClick={() => setPaymentMethod(m as any)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
                   ))}
                 </div>
@@ -1961,12 +2072,13 @@ export const POSView: React.FC = () => {
               <div className="px-8 py-6 bg-gray-50 border-t">
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 text-sm font-bold gap-4">
                   <div className="flex flex-wrap gap-4 lg:gap-8">
-                    <p className="text-gray-500">Ventas: <span className="text-green-600">${reportStats.totalSales.toLocaleString()}</span></p>
+                    <p className="text-gray-500">Ventas (Caja): <span className="text-green-600">${reportStats.totalSales.toLocaleString()}</span></p>
+                    <p className="text-gray-500">Créditos (Pendientes): <span className="text-amber-600">${reportStats.totalCredits.toLocaleString()}</span></p>
                     <p className="text-gray-500">Gastos: <span className="text-red-600">-${reportStats.totalExpenses.toLocaleString()}</span></p>
                   </div>
                 </div>
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2">
-                  <p className="text-lg font-black text-gray-800 uppercase tracking-widest">Balance Neto:</p>
+                  <p className="text-lg font-black text-gray-800 uppercase tracking-widest">Utilidad Neta (Caja):</p>
                   <p className="text-3xl lg:text-4xl font-black text-blue-600">${reportStats.balance.toLocaleString()}</p>
                 </div>
               </div>
