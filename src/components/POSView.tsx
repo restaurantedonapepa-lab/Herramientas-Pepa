@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, onSnapshot, addDoc, updateDoc, doc, 
   increment, serverTimestamp, query, where, getDocs,
-  setDoc, orderBy, deleteDoc
+  setDoc, orderBy, deleteDoc, deleteField
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, SaleItem, Table, Sale, Expense, BusinessSettings } from '../types';
@@ -84,6 +84,7 @@ export const POSView: React.FC = () => {
   const [isPrinterConnected, setIsPrinterConnected] = useState(printerService.isConnected());
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [productOrder, setProductOrder] = useState<string[]>([]);
+  const [mobileActiveTab, setMobileActiveTab] = useState<'menu' | 'cart'>('menu');
 
   // Detectar cambios en la conexión USB
   useEffect(() => {
@@ -1113,6 +1114,7 @@ export const POSView: React.FC = () => {
   const openTable = (tableId: string) => {
     setActiveTableId(tableId);
     setView('menu');
+    setMobileActiveTab('menu');
     setActiveCategory('all');
     setSearchTerm('');
     setSelectedItemsForPayment({});
@@ -1274,16 +1276,50 @@ export const POSView: React.FC = () => {
     setActiveTableId(targetTable.id);
   };
 
+  const clearTable = async () => {
+    if (!activeTableId || !activeTable) return;
+    const result = await Swal.fire({
+      title: '¿Borrar pedido?',
+      text: 'Esta acción vaciará la mesa y no se puede deshacer.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Sí, borrar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
+      if (activeTable.number < 1) {
+        // Es un domicilio, borrar el documento
+        await deleteDoc(doc(db, 'tables', activeTableId));
+        setActiveTableId(null);
+      } else {
+        // Es una mesa normal, vaciarla
+        await updateDoc(doc(db, 'tables', activeTableId), {
+          items: [],
+          status: 'free',
+          clientName: '',
+          shippingInfo: deleteField()
+        });
+      }
+      Swal.fire({ icon: 'success', title: 'Pedido borrado', timer: 1500, showConfirmButton: false });
+    }
+  };
+
   return (
-    <div className="flex h-full bg-gray-100 overflow-hidden relative min-h-0">
+    <div className="flex h-full bg-gray-100 overflow-hidden relative min-h-0 flex-col lg:flex-row">
       {/* Left Panel */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 border-r relative">
+      <div className={cn(
+        "flex-1 flex flex-col min-w-0 min-h-0 border-r relative",
+        view === 'menu' && mobileActiveTab === 'cart' ? 'hidden lg:flex' : 'flex'
+      )}>
         <AnimatePresence mode="wait">
           {view === 'tables' && (
             <motion.div key="tables" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col p-6 overflow-y-auto min-h-0">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
-                <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                <h2 className="text-xl sm:text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
+                <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
                   <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Historial"><History className="w-5 h-5 text-gray-600" /></button>
                   <button 
                     onClick={async () => {
@@ -1473,8 +1509,11 @@ export const POSView: React.FC = () => {
       </div>
 
       {/* Right Panel */}
-      <div className="w-[400px] bg-white shadow-2xl flex flex-col z-20">
-        <div className="p-6 border-b bg-gray-50/50">
+      <div className={cn(
+        "w-full lg:w-[400px] bg-white shadow-2xl flex flex-col z-20 flex-1 lg:flex-none min-h-0",
+        (view === 'tables' || (view === 'menu' && mobileActiveTab === 'menu')) ? 'hidden lg:flex' : 'flex'
+      )}>
+        <div className="p-6 border-b bg-gray-50/50 shrink-0">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-black text-gray-800 flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-red-600" />{activeTable ? `Mesa ${activeTable.number}` : 'Seleccione Mesa'}</h2>
             <div className="flex gap-1">
@@ -1485,6 +1524,7 @@ export const POSView: React.FC = () => {
                     const { value: target } = await Swal.fire({ title: 'Mover Mesa', input: 'number', inputLabel: 'Número de mesa destino', showCancelButton: true });
                     if (target) moveTable(Number(target));
                   }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition" title="Mover Mesa"><RefreshCw className="w-5 h-5" /></button>
+                  <button onClick={clearTable} className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition" title="Borrar Pedido"><Trash2 className="w-5 h-5" /></button>
                 </>
               )}
             </div>
@@ -1494,7 +1534,7 @@ export const POSView: React.FC = () => {
             <input type="text" placeholder="Nombre del Cliente" className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-sm font-bold" value={activeTable?.clientName || ''} onChange={async (e) => { if (activeTableId) await updateDoc(doc(db, 'tables', activeTableId), { clientName: e.target.value }); }} disabled={!activeTable} />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+        <div className="flex-1 overflow-y-auto divide-y divide-gray-50 min-h-0">
           {activeTable?.items.map(item => (
             <div key={item.productId} className="p-4 hover:bg-gray-50 transition group">
               <div className="flex gap-3 mb-3">
@@ -1547,21 +1587,52 @@ export const POSView: React.FC = () => {
         </div>
       </div>
 
+      {/* Mobile Navigation Bar */}
+      {view === 'menu' && (
+        <div className="lg:hidden flex border-t bg-white p-2 gap-2 sticky bottom-0 z-[60] shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+          <button 
+            onClick={() => setMobileActiveTab('menu')}
+            className={cn(
+              "flex-1 py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all",
+              mobileActiveTab === 'menu' ? "bg-red-600 text-white shadow-lg" : "bg-gray-50 text-gray-400"
+            )}
+          >
+            <LayoutGrid className="w-5 h-5" />
+            MENÚ
+          </button>
+          <button 
+            onClick={() => setMobileActiveTab('cart')}
+            className={cn(
+              "flex-1 py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all relative",
+              mobileActiveTab === 'cart' ? "bg-red-600 text-white shadow-lg" : "bg-gray-50 text-gray-400"
+            )}
+          >
+            <ShoppingCart className="w-5 h-5" />
+            PEDIDO
+            {activeTable && activeTable.items.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">
+                {activeTable.items.reduce((acc, item) => acc + item.quantity, 0)}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Modals */}
       <AnimatePresence>
         {showPaymentModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl overflow-hidden flex h-[700px] max-h-[95vh]">
-              <div className="w-1/3 bg-gray-900 text-white p-10 flex flex-col">
-                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-gray-500 mb-12">Resumen de Pago</h3>
-                <div className="space-y-8 flex-1">
-                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Recibido</p><p className="text-4xl font-black text-blue-400">${(paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount).toLocaleString()}</p></div>
-                  <div className="pt-8 border-t border-white/10"><p className="text-xs font-bold text-gray-500 uppercase mb-2">Cambio</p><p className={cn("text-5xl font-black", (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) >= currentTotalToPay ? "text-green-400" : "text-red-400")}>${Math.max(0, (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) - currentTotalToPay).toLocaleString()}</p></div>
+            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col lg:flex-row h-full lg:h-[700px] max-h-screen lg:max-h-[95vh]">
+              <div className="w-full lg:w-1/3 bg-gray-900 text-white p-6 lg:p-10 flex flex-col">
+                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-gray-500 mb-6 lg:mb-12">Resumen de Pago</h3>
+                <div className="space-y-4 lg:space-y-8 flex-1">
+                  <div><p className="text-xs font-bold text-gray-500 uppercase mb-2">Recibido</p><p className="text-2xl lg:text-4xl font-black text-blue-400">${(paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount).toLocaleString()}</p></div>
+                  <div className="pt-4 lg:pt-8 border-t border-white/10"><p className="text-xs font-bold text-gray-500 uppercase mb-2">Cambio</p><p className={cn("text-3xl lg:text-5xl font-black", (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) >= currentTotalToPay ? "text-green-400" : "text-red-400")}>${Math.max(0, (paymentMethod === 'Mixto' ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) : receivedAmount) - currentTotalToPay).toLocaleString()}</p></div>
                 </div>
-                <div className="bg-white/5 rounded-2xl p-4 text-center"><p className="text-xs font-black uppercase tracking-widest text-gray-400">{paymentMethod}</p></div>
+                <div className="bg-white/5 rounded-2xl p-4 text-center mt-4 lg:mt-0"><p className="text-xs font-black uppercase tracking-widest text-gray-400">{paymentMethod}</p></div>
               </div>
-              <div className="flex-1 p-10 flex flex-col overflow-hidden">
-                <div className="flex justify-between items-center mb-8 flex-shrink-0"><h3 className="text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
+              <div className="flex-1 p-6 lg:p-10 flex flex-col overflow-hidden">
+                <div className="flex justify-between items-center mb-4 lg:mb-8 flex-shrink-0"><h3 className="text-xl lg:text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
                 <div className="grid grid-cols-3 gap-3 mb-8 flex-shrink-0">
                   {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
                     <button key={m} onClick={() => setPaymentMethod(m as any)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
@@ -1826,15 +1897,15 @@ export const POSView: React.FC = () => {
 
               {/* Footer */}
               <div className="px-8 py-6 bg-gray-50 border-t">
-                <div className="flex justify-between items-center mb-4 text-sm font-bold">
-                  <div className="flex gap-8">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 text-sm font-bold gap-4">
+                  <div className="flex flex-wrap gap-4 lg:gap-8">
                     <p className="text-gray-500">Ventas: <span className="text-green-600">${reportStats.totalSales.toLocaleString()}</span></p>
                     <p className="text-gray-500">Gastos: <span className="text-red-600">-${reportStats.totalExpenses.toLocaleString()}</span></p>
                   </div>
                 </div>
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2">
                   <p className="text-lg font-black text-gray-800 uppercase tracking-widest">Balance Neto:</p>
-                  <p className="text-4xl font-black text-blue-600">${reportStats.balance.toLocaleString()}</p>
+                  <p className="text-3xl lg:text-4xl font-black text-blue-600">${reportStats.balance.toLocaleString()}</p>
                 </div>
               </div>
             </motion.div>
@@ -1850,9 +1921,10 @@ export const POSView: React.FC = () => {
                 </div>
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-8">
-                <table className="w-full text-left">
-                  <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th><th className="pb-4 text-right">Acción</th></tr></thead>
+              <div className="flex-1 overflow-y-auto p-4 lg:p-8">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left min-w-[600px]">
+                    <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th><th className="pb-4 text-right">Acción</th></tr></thead>
                   <tbody className="divide-y">
                     {historyData.map(sale => (
                       <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
@@ -1881,6 +1953,7 @@ export const POSView: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+            </div>
             </motion.div>
           </div>
         )}

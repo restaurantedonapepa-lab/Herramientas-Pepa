@@ -75,8 +75,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
   }
 }
 
-const Navigation: React.FC<{ user: User | null, userProfile: any }> = ({ user, userProfile }) => {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+const Navigation: React.FC<{ user: User | null, userProfile: any, isOpen: boolean, setIsOpen: (open: boolean) => void }> = ({ user, userProfile, isOpen, setIsOpen }) => {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -94,48 +93,73 @@ const Navigation: React.FC<{ user: User | null, userProfile: any }> = ({ user, u
   const filteredItems = navItems.filter(item => item.roles.includes(userProfile?.role || 'cliente'));
 
   return (
-    <aside className={`bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
-      <div className="p-4 border-b flex items-center justify-between">
-        <div className={`flex items-center gap-2 overflow-hidden ${!isSidebarOpen && 'hidden'}`}>
-          <div className="w-8 h-8 bg-red-600 rounded flex items-center justify-center text-white font-bold">DP</div>
-          <span className="font-bold text-gray-800 whitespace-nowrap">Doña Pepa</span>
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] lg:hidden"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+      
+      <aside className={cn(
+        "bg-white border-r shadow-sm flex flex-col transition-all duration-300 z-[70]",
+        "fixed inset-y-0 left-0 lg:relative lg:translate-x-0",
+        isOpen ? "w-64 translate-x-0" : "w-64 lg:w-20 -translate-x-full lg:translate-x-0"
+      )}>
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className={cn("flex items-center gap-2 overflow-hidden", !isOpen && 'lg:hidden')}>
+            <div className="w-8 h-8 bg-red-600 rounded flex items-center justify-center text-white font-bold">DP</div>
+            <span className="font-bold text-gray-800 whitespace-nowrap">Doña Pepa</span>
+          </div>
+          <button onClick={() => setIsOpen(!isOpen)} className="p-2 hover:bg-gray-100 rounded-lg transition mx-auto hidden lg:block">
+            {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+          <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-gray-100 rounded-lg transition lg:hidden">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg transition mx-auto">
-          {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      </div>
 
-      <nav className="flex-1 p-3 space-y-2">
-        {filteredItems.map(item => (
-          <Link
-            key={item.id}
-            to={item.path}
-            className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold ${
-              location.pathname === item.path 
-                ? 'bg-gray-100 text-gray-900' 
-                : 'text-gray-500 hover:bg-gray-50'
-            }`}
+        <nav className="flex-1 p-3 space-y-2">
+          {filteredItems.map(item => (
+            <Link
+              key={item.id}
+              to={item.path}
+              onClick={() => setIsOpen(false)}
+              className={cn(
+                "w-full flex items-center gap-3 p-3 rounded-xl transition font-bold",
+                location.pathname === item.path 
+                  ? 'bg-gray-100 text-gray-900' 
+                  : 'text-gray-500 hover:bg-gray-50'
+              )}
+            >
+              <item.icon className={cn("w-6 h-6 flex-shrink-0", item.color)} />
+              <span className={cn(
+                "whitespace-nowrap overflow-hidden transition-all",
+                !isOpen && 'lg:w-0 lg:opacity-0'
+              )}>
+                {item.label}
+              </span>
+            </Link>
+          ))}
+        </nav>
+
+        <div className="p-3 border-t">
+          <button 
+            onClick={() => { logout(); setIsOpen(false); }}
+            className="w-full flex items-center gap-3 p-3 rounded-xl text-red-600 hover:bg-red-50 transition font-bold"
           >
-            <item.icon className={`w-6 h-6 flex-shrink-0 ${item.color}`} />
-            <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
-              {item.label}
+            <LogOut className="w-6 h-6 flex-shrink-0" />
+            <span className={cn(
+              "whitespace-nowrap overflow-hidden transition-all",
+              !isOpen && 'lg:w-0 lg:opacity-0'
+            )}>
+              Cerrar Sesión
             </span>
-          </Link>
-        ))}
-      </nav>
-
-      <div className="p-3 border-t">
-        <button 
-          onClick={logout}
-          className="w-full flex items-center gap-3 p-3 rounded-xl text-red-600 hover:bg-red-50 transition font-bold"
-        >
-          <LogOut className="w-6 h-6 flex-shrink-0" />
-          <span className={`whitespace-nowrap overflow-hidden transition-all ${!isSidebarOpen && 'w-0 opacity-0'}`}>
-            Cerrar Sesión
-          </span>
-        </button>
-      </div>
-    </aside>
+          </button>
+        </div>
+      </aside>
+    </>
   );
 };
 
@@ -174,10 +198,13 @@ export default function App() {
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { userProfile } = useCart();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const isKiosk = queryParams.get('kiosk') === 'true';
+
+  const isAdminView = ['/pos', '/inventory', '/users'].includes(location.pathname);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -199,10 +226,21 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
+    <div className="flex h-screen bg-gray-100 overflow-hidden relative">
       <GoogleOneTap />
       <CheckoutModal />
-      {!isKiosk && <Navigation user={user} userProfile={userProfile} />}
+      {!isKiosk && <Navigation user={user} userProfile={userProfile} isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />}
+      
+      {/* Floating Mobile Hamburger Menu */}
+      {!isKiosk && isAdminView && (
+        <button 
+          onClick={() => setIsSidebarOpen(true)}
+          className="lg:hidden fixed bottom-6 left-6 z-[55] p-4 bg-red-600 text-white rounded-full shadow-2xl hover:bg-red-700 transition"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
+      )}
+
       <main className={cn("flex-1 flex flex-col", location.pathname === '/pos' ? "overflow-hidden" : "overflow-y-auto")}>
         {!isKiosk && <Header />}
         <ErrorBoundary>
