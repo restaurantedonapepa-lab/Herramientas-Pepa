@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, getDocs, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
-import { Product, Table } from '../types';
+import { Product, Table, Ingredient } from '../types';
 import { useCart } from '../context/CartContext';
 import { 
   Search, ShoppingCart, Heart, Info, X, 
@@ -19,6 +19,7 @@ function cn(...inputs: ClassValue[]) {
 
 export const CatalogView: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
@@ -39,7 +40,17 @@ export const CatalogView: React.FC = () => {
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'products');
     });
-    return () => unsubscribe();
+
+    const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
+      setIngredients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ingredient)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'ingredients');
+    });
+
+    return () => {
+      unsubscribe();
+      unsubIngredients();
+    };
   }, []);
 
   useEffect(() => {
@@ -101,6 +112,10 @@ export const CatalogView: React.FC = () => {
       return indexA - indexB;
     });
   }, [products, selectedCategory, searchTerm, productOrder]);
+
+  const getProductWebPrice = (product: Product) => {
+    return product.price + (product.packagingPrice || 0);
+  };
 
   if (loading) {
     return (
@@ -218,11 +233,12 @@ export const CatalogView: React.FC = () => {
                   
                   <div className="flex items-center justify-between pt-4 border-t border-gray-50">
                     <span className="text-2xl font-black text-gray-900">
-                      ${product.price.toLocaleString()}
+                      ${getProductWebPrice(product).toLocaleString()}
                     </span>
                     <button 
                       onClick={(e) => {
-                        addToCart({ productId: product.id, name: product.name, price: product.price, quantity: 1 });
+                        const finalPrice = getProductWebPrice(product);
+                        addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
                         triggerFlyAnimation(e, getDriveImageUrl(product.imageId), 'cart');
                       }}
                       className="w-12 h-12 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black hover:scale-110 transition-all shadow-lg"

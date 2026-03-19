@@ -18,6 +18,7 @@ export const InventoryView: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [isProductActive, setIsProductActive] = useState(true);
   const [showIngredientList, setShowIngredientList] = useState(false);
   const [isQuickCreatingIngredient, setIsQuickCreatingIngredient] = useState(false);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -204,7 +205,8 @@ export const InventoryView: React.FC = () => {
       name: formData.get('name') as string,
       stock: Number(formData.get('stock')),
       unit: formData.get('unit') as string,
-      minStock: Number(formData.get('minStock')) || 0
+      minStock: Number(formData.get('minStock')) || 0,
+      price: Number(formData.get('price')) || 0
     };
 
     if (editingItem) {
@@ -278,6 +280,7 @@ export const InventoryView: React.FC = () => {
       description: formData.get('description') as string,
       imageId: formData.get('imageId') as string,
       active: formData.get('active') === 'on',
+      packagingPrice: Number(formData.get('packagingPrice')) || 0,
       recipe: editingItem?.recipe || []
     };
 
@@ -306,13 +309,15 @@ export const InventoryView: React.FC = () => {
   };
 
   const updateRecipeQty = (index: number, qty: number) => {
-    const newRecipe = [...editingItem.recipe];
-    newRecipe[index].quantity = qty;
-    setEditingItem({ ...editingItem, recipe: newRecipe });
+    const newRecipe = [...(editingItem.recipe || [])];
+    if (newRecipe[index]) {
+      newRecipe[index].quantity = qty;
+      setEditingItem({ ...editingItem, recipe: newRecipe });
+    }
   };
 
   const removeRecipeItem = (index: number) => {
-    const newRecipe = editingItem.recipe.filter((_: any, i: number) => i !== index);
+    const newRecipe = (editingItem.recipe || []).filter((_: any, i: number) => i !== index);
     setEditingItem({ ...editingItem, recipe: newRecipe });
   };
 
@@ -395,7 +400,11 @@ export const InventoryView: React.FC = () => {
             </div>
           )}
           <button 
-            onClick={() => { setEditingItem(null); setIsModalOpen(true); }}
+            onClick={() => { 
+              setEditingItem(null); 
+              setIsProductActive(true);
+              setIsModalOpen(true); 
+            }}
             className={cn(
               "px-6 py-2 rounded-xl font-bold flex items-center gap-2 transition shadow-md text-white",
               activeTab === 'ingredients' ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
@@ -432,6 +441,10 @@ export const InventoryView: React.FC = () => {
                   <span className="text-2xl font-black text-gray-900">{ing.stock} <span className="text-sm text-gray-400 font-bold">{ing.unit}</span></span>
                 </div>
                 <div className="text-right">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Precio/Costo</span>
+                  <span className="text-sm font-bold text-green-600">${(ing.price || 0).toLocaleString()}</span>
+                </div>
+                <div className="text-right">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Mínimo</span>
                   <span className="text-sm font-bold text-gray-600">{ing.minStock} {ing.unit}</span>
                 </div>
@@ -458,7 +471,11 @@ export const InventoryView: React.FC = () => {
                     <p className="text-xs text-gray-500 uppercase font-bold">{prod.category}</p>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => { setEditingItem(prod); setIsModalOpen(true); }} className="text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
+                    <button onClick={() => { 
+                      setEditingItem(prod); 
+                      setIsProductActive(prod.active ?? true);
+                      setIsModalOpen(true); 
+                    }} className="text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
                     <button onClick={() => handleDeleteProduct(prod.id)} className="text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
@@ -490,6 +507,7 @@ export const InventoryView: React.FC = () => {
       <button
         onClick={() => {
           setEditingItem(null);
+          setIsProductActive(true);
           setIsModalOpen(true);
         }}
         className={cn(
@@ -531,6 +549,10 @@ export const InventoryView: React.FC = () => {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Stock Mínimo</label>
                     <input name="minStock" type="number" step="any" defaultValue={editingItem?.minStock} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" />
                   </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Precio/Costo</label>
+                    <input name="price" type="number" step="any" defaultValue={editingItem?.price || 0} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -555,9 +577,33 @@ export const InventoryView: React.FC = () => {
                       <label className="block text-sm font-bold text-gray-700 mb-1">Descripción</label>
                       <textarea name="description" defaultValue={editingItem?.description} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-red-500 outline-none h-20" />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" name="active" defaultChecked={editingItem?.active ?? true} id="active" />
-                      <label htmlFor="active" className="text-sm font-bold text-gray-700">Activo en catálogo</label>
+                    <div className="flex flex-col gap-4 col-span-2">
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          name="active" 
+                          checked={isProductActive} 
+                          onChange={(e) => setIsProductActive(e.target.checked)}
+                          id="active" 
+                          className="w-5 h-5 rounded border-gray-300 text-red-600 focus:ring-red-500" 
+                        />
+                        <label htmlFor="active" className="text-sm font-bold text-gray-700">Activo en catálogo web</label>
+                      </div>
+                      
+                      <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 animate-in fade-in slide-in-from-top-2">
+                        <label className="block text-[10px] font-black text-orange-600 uppercase tracking-widest mb-2">Recargo Domicilio / Web (Empaque)</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-orange-400 font-bold">$</span>
+                          <input 
+                            name="packagingPrice" 
+                            type="number" 
+                            defaultValue={editingItem?.packagingPrice || 0} 
+                            className="w-full pl-8 pr-4 py-2 bg-white border border-orange-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-sm font-bold text-orange-900" 
+                            placeholder="0"
+                          />
+                        </div>
+                        <p className="text-[10px] text-orange-400 mt-2 font-medium italic">* Este valor se sumará al precio base en domicilios (TPV y Web).</p>
+                      </div>
                     </div>
                   </div>
 
@@ -638,6 +684,10 @@ export const InventoryView: React.FC = () => {
                               <div>
                                 <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Stock Mínimo</label>
                                 <input name="minStock" type="number" step="any" className="w-full bg-gray-100 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-red-500 outline-none" />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Precio/Costo</label>
+                                <input name="price" type="number" step="any" className="w-full bg-gray-100 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-red-500 outline-none" />
                               </div>
                               <button type="submit" className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg hover:bg-red-700 transition flex items-center justify-center gap-2">
                                 <Plus className="w-5 h-5" /> Crear y Añadir

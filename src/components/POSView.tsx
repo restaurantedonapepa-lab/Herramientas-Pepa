@@ -80,6 +80,8 @@ export const POSView: React.FC = () => {
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [deliveryInfo, setDeliveryInfo] = useState({ name: '', phone: '', address: '', notes: '' });
   const [editingSettings, setEditingSettings] = useState<BusinessSettings | null>(null);
   const [isPrinterConnected, setIsPrinterConnected] = useState(printerService.isConnected());
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
@@ -121,6 +123,40 @@ export const POSView: React.FC = () => {
   const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
   const [historyData, setHistoryData] = useState<Sale[]>([]);
   const [lastImportBatch, setLastImportBatch] = useState<string | null>(localStorage.getItem('lastImportBatch'));
+
+  const lookupCustomer = async (phone: string) => {
+    if (phone.length < 7) return;
+    try {
+      // First check dedicated customers collection
+      const q = query(collection(db, 'customers'), where('phone', '==', phone));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data();
+        setDeliveryInfo(prev => ({
+          ...prev,
+          name: data.name || prev.name,
+          address: data.address || prev.address,
+          notes: data.notes || prev.notes || ''
+        }));
+        return;
+      }
+
+      // Then check users collection (catalog customers)
+      const q2 = query(collection(db, 'users'), where('phone', '==', phone));
+      const snapshot2 = await getDocs(q2);
+      if (!snapshot2.empty) {
+        const data = snapshot2.docs[0].data();
+        setDeliveryInfo(prev => ({
+          ...prev,
+          name: data.displayName || prev.name,
+          address: data.address || prev.address,
+          notes: data.notes || prev.notes || ''
+        }));
+      }
+    } catch (error) {
+      console.error('Error looking up customer:', error);
+    }
+  };
 
   // Derived States
   const activeTable = useMemo(() => tables.find(t => t.id === activeTableId), [tables, activeTableId]);
@@ -1147,12 +1183,24 @@ export const POSView: React.FC = () => {
 
   const addToOrder = async (product: Product) => {
     if (!activeTableId || !activeTable) return;
+    
+    const isDelivery = activeTable.number < 1;
+    const itemPrice = isDelivery ? (product.price + (product.packagingPrice || 0)) : product.price;
+
     const newItems = [...activeTable.items];
     const existingIndex = newItems.findIndex(item => item.productId === product.id);
     if (existingIndex >= 0) {
       newItems[existingIndex].quantity += 1;
+      newItems[existingIndex].price = itemPrice; // Asegurar que el precio sea el correcto para el modo actual
     } else {
-      newItems.push({ productId: product.id, name: product.name, price: product.price, quantity: 1, originalPrice: product.price, note: '' });
+      newItems.push({ 
+        productId: product.id, 
+        name: product.name, 
+        price: itemPrice, 
+        quantity: 1, 
+        originalPrice: product.price, 
+        note: '' 
+      });
     }
     await updateDoc(doc(db, 'tables', activeTableId), { items: newItems, status: 'busy', lastUpdate: serverTimestamp() });
     setSearchTerm('');
@@ -1218,9 +1266,12 @@ export const POSView: React.FC = () => {
 
       for (const item of itemsToPay) {
         const product = products.find(p => p.id === item.productId);
+        // Deduct regular recipe
         if (product?.recipe) {
           for (const recipeItem of product.recipe) {
-            await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { stock: increment(-(recipeItem.quantity * item.quantity)) });
+            await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+              stock: increment(-(recipeItem.quantity * item.quantity)) 
+            });
           }
         }
       }
@@ -1320,6 +1371,17 @@ export const POSView: React.FC = () => {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <h2 className="text-xl sm:text-2xl font-black text-gray-800 flex items-center gap-2"><LayoutGrid className="w-6 h-6 text-red-600" />Mapa de Mesas</h2>
                 <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
+                  <button 
+                    onClick={() => {
+                      setDeliveryInfo({ name: '', phone: '', address: '', notes: '' });
+                      setShowDeliveryModal(true);
+                    }}
+                    className="p-2 bg-orange-50 border border-orange-200 rounded-xl hover:bg-orange-100 transition shadow-sm flex items-center gap-2 text-orange-600 font-bold text-xs"
+                    title="Nuevo Domicilio"
+                  >
+                    <Globe className="w-5 h-5" />
+                    <span className="hidden sm:inline">DOMICILIO</span>
+                  </button>
                   <button onClick={() => setShowHistoryModal(true)} className="p-2 bg-white border rounded-xl hover:bg-gray-50 transition shadow-sm" title="Historial"><History className="w-5 h-5 text-gray-600" /></button>
                   <button 
                     onClick={async () => {
@@ -2069,6 +2131,121 @@ export const POSView: React.FC = () => {
                   className="flex-1 py-4 bg-purple-600 text-white font-black rounded-2xl shadow-xl hover:bg-purple-700 transition"
                 >
                   GUARDAR CAMBIOS
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showDeliveryModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+              <div className="p-8 border-b flex justify-between items-center bg-orange-50">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-orange-100 rounded-2xl">
+                    <Globe className="w-6 h-6 text-orange-600" />
+                  </div>
+                  <h3 className="text-2xl font-black text-gray-800">Nuevo Domicilio</h3>
+                </div>
+                <button onClick={() => setShowDeliveryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
+              </div>
+              
+              <div className="p-8 space-y-4">
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2 tracking-widest">Teléfono (Prioridad)</label>
+                  <input 
+                    type="tel" 
+                    placeholder="Ej: 3101234567"
+                    value={deliveryInfo.phone}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDeliveryInfo(prev => ({ ...prev, phone: val }));
+                      if (val.length >= 7) lookupCustomer(val);
+                    }}
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none font-bold text-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2 tracking-widest">Nombre del Cliente</label>
+                  <input 
+                    type="text" 
+                    placeholder="Nombre completo"
+                    value={deliveryInfo.name}
+                    onChange={(e) => setDeliveryInfo(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2 tracking-widest">Dirección de Entrega</label>
+                  <input 
+                    type="text" 
+                    placeholder="Calle, Carrera, Barrio..."
+                    value={deliveryInfo.address}
+                    onChange={(e) => setDeliveryInfo(prev => ({ ...prev, address: e.target.value }))}
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase mb-2 tracking-widest">Notas / Referencias</label>
+                  <textarea 
+                    placeholder="Ej: Apartamento 201, frente al parque..."
+                    value={deliveryInfo.notes}
+                    onChange={(e) => setDeliveryInfo(prev => ({ ...prev, notes: e.target.value }))}
+                    className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none font-bold resize-none h-24"
+                  />
+                </div>
+
+                <button 
+                  onClick={async () => {
+                    if (!deliveryInfo.name || !deliveryInfo.phone || !deliveryInfo.address) {
+                      Swal.fire({ icon: 'error', title: 'Campos Incompletos', text: 'Por favor complete nombre, teléfono y dirección.' });
+                      return;
+                    }
+
+                    try {
+                      // Save/Update customer info
+                      const customerRef = doc(db, 'customers', deliveryInfo.phone);
+                      await setDoc(customerRef, {
+                        id: deliveryInfo.phone,
+                        name: deliveryInfo.name,
+                        phone: deliveryInfo.phone,
+                        address: deliveryInfo.address,
+                        notes: deliveryInfo.notes,
+                        lastOrder: serverTimestamp()
+                      }, { merge: true });
+
+                      // Create delivery table
+                      const domTables = tables.filter(t => t.number < 1);
+                      const nextDomIndex = domTables.length > 0 
+                        ? Math.max(...domTables.map(t => Math.round(t.number * 100))) + 1 
+                        : 1;
+                      const nextDomNumber = nextDomIndex / 100;
+                      const tableId = `dom-${Date.now()}`;
+                      
+                      await setDoc(doc(db, 'tables', tableId), {
+                        number: nextDomNumber,
+                        items: [],
+                        clientName: deliveryInfo.name,
+                        status: 'busy',
+                        lastUpdate: serverTimestamp(),
+                        shippingInfo: {
+                          name: deliveryInfo.name,
+                          phone: deliveryInfo.phone,
+                          address: deliveryInfo.address,
+                          notes: deliveryInfo.notes
+                        }
+                      });
+                      
+                      setActiveTableId(tableId);
+                      setView('menu');
+                      setShowDeliveryModal(false);
+                    } catch (error) {
+                      handleFirestoreError(error, OperationType.WRITE, 'tables');
+                    }
+                  }}
+                  className="w-full py-5 bg-orange-600 text-white font-black text-xl rounded-3xl shadow-xl hover:bg-orange-700 transition"
+                >
+                  CREAR PEDIDO
                 </button>
               </div>
             </motion.div>

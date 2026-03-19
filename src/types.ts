@@ -7,7 +7,9 @@ export interface Product {
   description: string;
   imageId: string;
   recipe: RecipeItem[];
+  webRecipe?: RecipeItem[]; // Insumos exclusivos para pedidos web (empaques)
   active: boolean;
+  packagingPrice?: number;
 }
 
 export interface Review {
@@ -30,6 +32,7 @@ export interface Ingredient {
   stock: number;
   unit: string;
   minStock: number;
+  price?: number; // Precio o costo del insumo
 }
 
 export interface Sale {
@@ -82,4 +85,13 @@ export interface BusinessSettings {
   whatsapp: string;
   tableCount: number;
   currencySymbol: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  notes?: string;
+  lastOrder?: any;
 }

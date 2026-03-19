@@ -38,6 +38,15 @@ service cloud.firestore {
         );
     }
 
+    function isStaff() {
+      return isAuthenticated() &&
+        (
+          isAdmin() ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['mesero', 'cajero', 'cocina'])
+        );
+    }
+
     function isValidProduct(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.price is number && data.price >= 0 &&
@@ -55,6 +64,12 @@ service cloud.firestore {
       return data.items is list && data.total is number && data.total >= 0;
     }
 
+    function isValidCustomer(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.phone is string && data.phone.size() >= 7 &&
+             data.address is string && data.address.size() > 0;
+    }
+
     // Rules
     
     match /products/{productId} {
@@ -63,13 +78,13 @@ service cloud.firestore {
     }
 
     match /ingredients/{ingredientId} {
-      allow read: if isAuthenticated();
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
     match /sales/{saleId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated();
+      allow read: if isStaff();
+      allow create: if isStaff();
       allow update, delete: if isAdmin();
     }
 
@@ -78,11 +93,11 @@ service cloud.firestore {
     }
 
     match /tables/{tableId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isStaff();
     }
 
     match /users/{userId} {
-      allow read: if isUser(userId) || isAdmin();
+      allow read: if isUser(userId) || isStaff();
       allow create: if isUser(userId);
       allow update: if isUser(userId) || isAdmin();
       allow delete: if isAdmin();
@@ -90,6 +105,11 @@ service cloud.firestore {
       match /settings/{settingId} {
         allow read, write: if isUser(userId) || isAdmin();
       }
+    }
+
+    match /customers/{phone} {
+      allow read: if isStaff();
+      allow write: if isStaff() && isValidCustomer(request.resource.data);
     }
 
     match /reviews/{reviewId} {

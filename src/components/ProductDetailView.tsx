@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
-import { Product, Review } from '../types';
+import { Product, Review, Ingredient } from '../types';
 import { useCart } from '../context/CartContext';
 import { 
   ArrowLeft, ShoppingCart, Star, Share2, MessageSquare, 
@@ -23,6 +23,7 @@ export const ProductDetailView: React.FC = () => {
   const navigate = useNavigate();
   const { addToCart, toggleFavorite, isFavorite, triggerFlyAnimation } = useCart();
   const [product, setProduct] = useState<Product | null>(null);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [newReview, setNewReview] = useState({ rating: 5, comment: '' });
@@ -61,18 +62,30 @@ export const ProductDetailView: React.FC = () => {
       handleFirestoreError(error, OperationType.GET, 'products');
     });
 
+    const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snapshot) => {
+      setIngredients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Ingredient)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'ingredients');
+    });
+
     return () => {
       unsubscribe();
+      unsubIngredients();
       if (unsubReviews) unsubReviews();
     };
   }, [slug]);
 
+  const getProductWebPrice = (product: Product) => {
+    return product.price + (product.packagingPrice || 0);
+  };
+
   const handleAddToCart = () => {
     if (!product) return;
+    const finalPrice = getProductWebPrice(product);
     addToCart({
       productId: product.id,
       name: product.name,
-      price: product.price,
+      price: finalPrice,
       quantity: 1
     });
     Swal.fire({
@@ -219,7 +232,7 @@ export const ProductDetailView: React.FC = () => {
                 <span className="text-sm font-bold text-gray-400">({reviews.length} reseñas)</span>
               </div>
 
-              <p className="text-4xl font-black text-red-600">${product.price.toLocaleString()}</p>
+              <p className="text-4xl font-black text-red-600">${getProductWebPrice(product).toLocaleString()}</p>
               
               <p className="text-lg text-gray-600 leading-relaxed py-4">
                 {product.description || 'Una deliciosa especialidad de la casa preparada con los mejores ingredientes y el toque tradicional de Doña Pepa.'}

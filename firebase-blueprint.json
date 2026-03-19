@@ -89,6 +89,19 @@
         "currencySymbol": { "type": "string", "description": "Símbolo de moneda (e.g., $)" }
       },
       "required": ["name", "whatsapp", "tableCount"]
+    },
+    "Customer": {
+      "title": "Cliente",
+      "description": "Información de contacto de clientes para domicilios",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Nombre del cliente" },
+        "phone": { "type": "string", "description": "Teléfono del cliente" },
+        "address": { "type": "string", "description": "Dirección de entrega" },
+        "notes": { "type": "string", "description": "Notas o referencias de entrega" },
+        "lastOrder": { "type": "string", "format": "date-time", "description": "Fecha del último pedido" }
+      },
+      "required": ["name", "phone", "address"]
     }
   },
   "firestore": {
@@ -97,6 +110,7 @@
     "/sales/{saleId}": { "schema": "Sale", "description": "Historial de ventas" },
     "/expenses/{expenseId}": { "schema": "Expense", "description": "Registro de gastos" },
     "/tables/{tableId}": { "schema": "Table", "description": "Estado de las mesas" },
-    "/settings/business": { "schema": "BusinessSettings", "description": "Configuración global del negocio" }
+    "/settings/business": { "schema": "BusinessSettings", "description": "Configuración global del negocio" },
+    "/customers/{phone}": { "schema": "Customer", "description": "Directorio de clientes para domicilios" }
   }
 }
