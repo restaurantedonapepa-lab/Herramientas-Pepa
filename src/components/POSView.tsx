@@ -176,7 +176,9 @@ export const POSView: React.FC = () => {
       
       setCategoryOrder(newOrder);
       try {
-        await setDoc(doc(db, 'settings', 'category_order'), { order: newOrder });
+        if (auth.currentUser) {
+          await setDoc(doc(db, 'users', auth.currentUser.uid, 'settings', 'category_order'), { order: newOrder });
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'settings');
       }
@@ -185,29 +187,25 @@ export const POSView: React.FC = () => {
       const oldIndex = filteredProducts.findIndex(p => p.id === active.id);
       const newIndex = filteredProducts.findIndex(p => p.id === over.id);
       
-      // We need to update the GLOBAL product order
-      // We take the current productOrder and move the item
-      // If it's not in the order, we add it
+      if (oldIndex === -1 || newIndex === -1) return;
+      
       let newOrder = [...productOrder];
       
-      // Ensure both products are in the order list for arrayMove to work correctly if they were sorted by name
-      const activeId = active.id as string;
-      const overId = over.id as string;
-      
-      if (!newOrder.includes(activeId)) newOrder.push(activeId);
-      if (!newOrder.includes(overId)) {
-        // Insert overId near activeId if it wasn't there
-        newOrder.push(overId);
-      }
+      // Ensure all products in the current view are in the order list
+      filteredProducts.forEach(p => {
+        if (!newOrder.includes(p.id)) newOrder.push(p.id);
+      });
 
-      const orderOldIndex = newOrder.indexOf(activeId);
-      const orderNewIndex = newOrder.indexOf(overId);
+      const orderOldIndex = newOrder.indexOf(active.id as string);
+      const orderNewIndex = newOrder.indexOf(over.id as string);
       
-      newOrder = arrayMove(newOrder, orderOldIndex, orderNewIndex);
+      newOrder = arrayMove(newOrder, orderOldIndex, orderNewIndex) as string[];
       
       setProductOrder(newOrder);
       try {
-        await setDoc(doc(db, 'settings', 'product_order'), { order: newOrder });
+        if (auth.currentUser) {
+          await setDoc(doc(db, 'users', auth.currentUser.uid, 'settings', 'product_order'), { order: newOrder });
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'settings');
       }
@@ -444,13 +442,13 @@ export const POSView: React.FC = () => {
         }
       }, (err) => handleFirestoreError(err, OperationType.GET, 'web_orders'));
 
-      unsubCategoryOrder = onSnapshot(doc(db, 'settings', 'category_order'), (snapshot) => {
+      unsubCategoryOrder = onSnapshot(doc(db, 'users', user.uid, 'settings', 'category_order'), (snapshot) => {
         if (snapshot.exists()) {
           setCategoryOrder(snapshot.data().order || []);
         }
       });
 
-      unsubProductOrder = onSnapshot(doc(db, 'settings', 'product_order'), (snapshot) => {
+      unsubProductOrder = onSnapshot(doc(db, 'users', user.uid, 'settings', 'product_order'), (snapshot) => {
         if (snapshot.exists()) {
           setProductOrder(snapshot.data().order || []);
         }
@@ -1484,7 +1482,7 @@ export const POSView: React.FC = () => {
       <AnimatePresence>
         {showPaymentModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl overflow-hidden flex h-[600px]">
+            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl overflow-hidden flex h-[700px] max-h-[95vh]">
               <div className="w-1/3 bg-gray-900 text-white p-10 flex flex-col">
                 <h3 className="text-xs font-black uppercase tracking-[0.2em] text-gray-500 mb-12">Resumen de Pago</h3>
                 <div className="space-y-8 flex-1">
@@ -1494,14 +1492,14 @@ export const POSView: React.FC = () => {
                 </div>
                 <div className="bg-white/5 rounded-2xl p-4 text-center"><p className="text-xs font-black uppercase tracking-widest text-gray-400">{paymentMethod}</p></div>
               </div>
-              <div className="flex-1 p-10 flex flex-col">
-                <div className="flex justify-between items-center mb-8"><h3 className="text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
-                <div className="grid grid-cols-3 gap-3 mb-8">
+              <div className="flex-1 p-10 flex flex-col overflow-hidden">
+                <div className="flex justify-between items-center mb-8 flex-shrink-0"><h3 className="text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
+                <div className="grid grid-cols-3 gap-3 mb-8 flex-shrink-0">
                   {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
                     <button key={m} onClick={() => setPaymentMethod(m as any)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
                   ))}
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 overflow-y-auto min-h-0 mb-6">
                   {paymentMethod === 'Efectivo' ? (
                     <div className="grid grid-cols-3 gap-3 h-full">
                       {[7, 8, 9, 4, 5, 6, 1, 2, 3, 'C', 0, '00'].map(val => (
@@ -1528,8 +1526,8 @@ export const POSView: React.FC = () => {
                       ))}
                     </div>
                   ) : paymentMethod === 'Mixto' ? (
-                    <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2">
-                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl">
+                    <div className="space-y-4 overflow-y-auto max-h-[400px] pr-2">
+                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl relative group">
                         <div className="space-y-2">
                           <label className="text-[10px] font-black text-gray-400 uppercase">Método 1</label>
                           <select className="w-full p-2 bg-white border rounded-xl font-bold text-sm" value={mixedPayments.method1} onChange={(e) => setMixedPayments(prev => ({ ...prev, method1: e.target.value }))}>
@@ -1537,7 +1535,15 @@ export const POSView: React.FC = () => {
                           </select>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 1</label>
+                          <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-black text-gray-400 uppercase">Monto 1</label>
+                            <button 
+                              onClick={() => setMixedPayments(prev => ({ ...prev, val1: currentTotalToPay, val2: 0, val3: 0 }))}
+                              className="text-[10px] font-black text-blue-600 uppercase hover:underline"
+                            >
+                              Todo
+                            </button>
+                          </div>
                           <input type="number" className="w-full p-2 bg-white border-2 border-red-100 rounded-xl font-black text-lg" value={mixedPayments.val1} onChange={(e) => { 
                             const v1 = Number(e.target.value); 
                             const remaining = Math.max(0, currentTotalToPay - v1);
@@ -1546,7 +1552,7 @@ export const POSView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl">
+                      <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-2xl relative group">
                         <div className="space-y-2">
                           <label className="text-[10px] font-black text-gray-400 uppercase">Método 2</label>
                           <select className="w-full p-2 bg-white border rounded-xl font-bold text-sm" value={mixedPayments.method2} onChange={(e) => setMixedPayments(prev => ({ ...prev, method2: e.target.value }))}>
@@ -1554,7 +1560,18 @@ export const POSView: React.FC = () => {
                           </select>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 2</label>
+                          <div className="flex justify-between items-center">
+                            <label className="text-[10px] font-black text-gray-400 uppercase">Monto 2</label>
+                            <button 
+                              onClick={() => {
+                                const remaining = Math.max(0, currentTotalToPay - mixedPayments.val1);
+                                setMixedPayments(prev => ({ ...prev, val2: remaining, val3: 0 }));
+                              }}
+                              className="text-[10px] font-black text-blue-600 uppercase hover:underline"
+                            >
+                              Resto
+                            </button>
+                          </div>
                           <input type="number" className="w-full p-2 bg-white border-2 border-red-100 rounded-xl font-black text-lg" value={mixedPayments.val2} onChange={(e) => { 
                             const v2 = Number(e.target.value); 
                             const remaining = Math.max(0, currentTotalToPay - mixedPayments.val1 - v2);
@@ -1571,7 +1588,7 @@ export const POSView: React.FC = () => {
                           </select>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 3</label>
+                          <label className="text-[10px] font-black text-gray-400 uppercase">Monto 3 (Automático)</label>
                           <input type="number" className="w-full p-2 bg-gray-100 border rounded-xl font-black text-lg text-gray-500" value={mixedPayments.val3} readOnly />
                         </div>
                       </div>
@@ -1580,7 +1597,18 @@ export const POSView: React.FC = () => {
                     <div className="h-full flex flex-col items-center justify-center text-center text-gray-400"><CheckCircle2 className="w-16 h-16 mb-4 text-green-500" /><p className="font-black uppercase tracking-widest">Monto Asignado</p></div>
                   )}
                 </div>
-                <button onClick={handlePayment} data-confirm-payment="true" disabled={paymentMethod !== 'Mixto' && receivedAmount < currentTotalToPay} className="mt-8 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all">CONFIRMAR PAGO</button>
+                <button 
+                  onClick={handlePayment} 
+                  data-confirm-payment="true" 
+                  disabled={
+                    paymentMethod === 'Mixto' 
+                      ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) < currentTotalToPay
+                      : receivedAmount < currentTotalToPay
+                  } 
+                  className="flex-shrink-0 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all"
+                >
+                  CONFIRMAR PAGO
+                </button>
               </div>
             </motion.div>
           </div>

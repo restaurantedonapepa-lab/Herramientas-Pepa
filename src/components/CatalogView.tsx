@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, getDriveImageUrl } from '../firebase';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { 
@@ -23,6 +23,8 @@ export const CatalogView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showCart, setShowCart] = useState(false);
   const [showCheckoutForm, setShowCheckoutForm] = useState(false);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const [productOrder, setProductOrder] = useState<string[]>([]);
   const [clientInfo, setClientInfo] = useState({ name: '', phone: '', address: '', notes: '' });
   const { 
     cart, addToCart, removeFromCart, updateQuantity, total, itemCount, 
@@ -42,14 +44,65 @@ export const CatalogView: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const categories = useMemo(() => ['Todos', ...new Set(products.map(p => p.category))], [products]);
+  useEffect(() => {
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (!user) {
+        setCategoryOrder([]);
+        setProductOrder([]);
+        return;
+      }
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         p.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = !selectedCategory || selectedCategory === 'Todos' || p.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+      const unsubCategoryOrder = onSnapshot(doc(db, 'users', user.uid, 'settings', 'category_order'), (snapshot) => {
+        if (snapshot.exists()) {
+          setCategoryOrder(snapshot.data().order || []);
+        }
+      });
+
+      const unsubProductOrder = onSnapshot(doc(db, 'users', user.uid, 'settings', 'product_order'), (snapshot) => {
+        if (snapshot.exists()) {
+          setProductOrder(snapshot.data().order || []);
+        }
+      });
+
+      return () => {
+        unsubCategoryOrder();
+        unsubProductOrder();
+      };
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  const categories = useMemo(() => {
+    const uniqueCategories = [...new Set(products.map(p => p.category))];
+    const sorted = uniqueCategories.sort((a, b) => {
+      const indexA = categoryOrder.indexOf(a);
+      const indexB = categoryOrder.indexOf(b);
+      if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+    return ['Todos', ...sorted];
+  }, [products, categoryOrder]);
+
+  const filteredProducts = useMemo(() => {
+    let filtered = products.filter(p => {
+      const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           p.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = !selectedCategory || selectedCategory === 'Todos' || p.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+
+    return filtered.sort((a, b) => {
+      const indexA = productOrder.indexOf(a.id);
+      const indexB = productOrder.indexOf(b.id);
+      if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+  }, [products, selectedCategory, searchTerm, productOrder]);
 
   if (loading) {
     return (

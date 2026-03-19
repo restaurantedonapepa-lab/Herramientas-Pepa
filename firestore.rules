@@ -86,6 +86,10 @@ service cloud.firestore {
       allow create: if isUser(userId);
       allow update: if isUser(userId) || isAdmin();
       allow delete: if isAdmin();
+
+      match /settings/{settingId} {
+        allow read, write: if isUser(userId) || isAdmin();
+      }
     }
 
     match /reviews/{reviewId} {
