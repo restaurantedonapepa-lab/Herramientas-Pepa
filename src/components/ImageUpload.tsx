@@ -16,7 +16,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({ onUploadSuccess, defau
   const [showManual, setShowManual] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxa_Z0q9imww8owIfO1xhLLeF2ECzljrIqFSJv2zVr9h93VSDyLxjoR4kaANg9KTDPb0w/exec';
+  const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwwYc44pNv-ZAxjsiHdOuk6Y2gGvDQLHmkJsdJBdr3YffwYu9lhRPj_OeU6vwjO8chnug/exec';
 
   useEffect(() => {
     setManualId(defaultValue || '');

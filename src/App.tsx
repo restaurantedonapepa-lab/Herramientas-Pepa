@@ -6,6 +6,7 @@ import { useCart } from './context/CartContext';
 import { CatalogView } from './components/CatalogView';
 import { POSView } from './components/POSView';
 import { InventoryView } from './components/InventoryView';
+import { BulkEditView } from './components/BulkEditView';
 import { UserManagementView } from './components/UserManagementView';
 import { ProductDetailView } from './components/ProductDetailView';
 import { Header } from './components/Header';
@@ -249,6 +250,7 @@ function AppContent() {
               <Route path="/" element={<CatalogView />} />
               <Route path="/pos" element={<POSView />} />
               <Route path="/inventory" element={<InventoryView />} />
+              <Route path="/bulk-edit" element={<BulkEditView />} />
               <Route path="/users" element={<UserManagementView />} />
               <Route path="/:slug" element={<ProductDetailView />} />
             </Routes>

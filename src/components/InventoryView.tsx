@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
@@ -13,6 +14,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 export const InventoryView: React.FC = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'ingredients' | 'products'>('ingredients');
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -360,6 +362,12 @@ export const InventoryView: React.FC = () => {
                 </button>
                 <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 py-2">
                   <button 
+                    onClick={() => navigate('/bulk-edit')}
+                    className="w-full px-4 py-3 text-left hover:bg-red-50 text-red-600 font-bold flex items-center gap-3 transition"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" /> Edición Masiva
+                  </button>
+                  <button 
                     onClick={handleCleanDuplicates}
                     className="w-full px-4 py-3 text-left hover:bg-orange-50 text-orange-600 font-bold flex items-center gap-3 transition"
                   >
@@ -385,6 +393,12 @@ export const InventoryView: React.FC = () => {
                 <MoreVertical className="w-6 h-6 text-gray-600" />
               </button>
               <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 py-2">
+                <button 
+                  onClick={() => navigate('/bulk-edit')}
+                  className="w-full px-4 py-3 text-left hover:bg-red-50 text-red-600 font-bold flex items-center gap-3 transition"
+                >
+                  <FileSpreadsheet className="w-4 h-4" /> Edición Masiva
+                </button>
                 <button 
                   onClick={handleCleanDuplicates}
                   className="w-full px-4 py-3 text-left hover:bg-orange-50 text-orange-600 font-bold flex items-center gap-3 transition"

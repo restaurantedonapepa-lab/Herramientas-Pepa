@@ -1744,16 +1744,26 @@ export const POSView: React.FC = () => {
                   >
                     <ArrowLeft className="w-5 h-5 text-gray-600" />
                   </button>
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                    <input 
-                      ref={searchInputRef}
-                      type="text" 
-                      placeholder="Buscar plato o categoría..." 
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-medium" 
-                      value={searchTerm} 
-                      onChange={(e) => setSearchTerm(e.target.value)} 
-                    />
+                  <div className="flex-1 relative flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                      <input 
+                        ref={searchInputRef}
+                        type="text" 
+                        placeholder="Buscar plato o categoría..." 
+                        className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-medium" 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)} 
+                      />
+                    </div>
+                    <button 
+                      onClick={closeTable}
+                      className="p-3 bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition shadow-sm flex items-center gap-2 border border-red-100"
+                      title="Volver a Mesas"
+                    >
+                      <TableIcon className="w-5 h-5" />
+                      <span className="hidden sm:inline font-black text-xs uppercase tracking-widest">Mesas</span>
+                    </button>
                   </div>
                 </div>
               </div>
