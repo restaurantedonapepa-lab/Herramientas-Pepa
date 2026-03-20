@@ -33,16 +33,20 @@ export const GoogleOneTap: React.FC = () => {
         window.google.accounts.id.initialize({
           client_id: clientId,
           callback: handleCredentialResponse,
-          auto_select: false, // Set to true for automatic login
+          auto_select: false,
           cancel_on_tap_outside: false,
+          context: 'signin',
+          itp_support: true // Soporte para navegadores con Intelligent Tracking Prevention (Safari)
         });
 
-        // Only show One Tap if user is not logged in
         const unsubscribe = onAuthStateChanged(auth, (user) => {
           if (!user) {
             window.google.accounts.id.prompt((notification: any) => {
               if (notification.isNotDisplayed()) {
                 console.log("One Tap not displayed:", notification.getNotDisplayedReason());
+              }
+              if (notification.isSkippedMoment()) {
+                console.log("One Tap skipped:", notification.getSkippedReason());
               }
             });
           }
