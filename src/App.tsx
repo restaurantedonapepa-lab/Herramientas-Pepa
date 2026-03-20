@@ -9,6 +9,7 @@ import { InventoryView } from './components/InventoryView';
 import { BulkEditView } from './components/BulkEditView';
 import { UserManagementView } from './components/UserManagementView';
 import { ProductDetailView } from './components/ProductDetailView';
+import { DigitalMenu } from './components/DigitalMenu';
 import { Header } from './components/Header';
 import { CheckoutModal } from './components/CheckoutModal';
 import { GoogleOneTap } from './components/GoogleOneTap';
@@ -226,14 +227,16 @@ function AppContent() {
     );
   }
 
+  const isCarta = location.pathname === '/carta';
+
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden relative">
+    <div className={cn("flex h-screen overflow-hidden relative", isCarta ? "bg-[#0a0a0a]" : "bg-gray-100")}>
       <GoogleOneTap />
       <CheckoutModal />
-      {!isKiosk && <Navigation user={user} userProfile={userProfile} isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />}
+      {!isKiosk && !isCarta && <Navigation user={user} userProfile={userProfile} isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />}
       
       {/* Floating Mobile Hamburger Menu */}
-      {!isKiosk && isAdminView && (
+      {!isKiosk && isAdminView && !isCarta && (
         <button 
           onClick={() => setIsSidebarOpen(true)}
           className="lg:hidden fixed bottom-6 left-6 z-[55] p-4 bg-red-600 text-white rounded-full shadow-2xl hover:bg-red-700 transition"
@@ -242,12 +245,13 @@ function AppContent() {
         </button>
       )}
 
-      <main className={cn("flex-1 flex flex-col", location.pathname === '/pos' ? "overflow-hidden" : "overflow-y-auto")}>
-        {!isKiosk && <Header />}
+      <main className={cn("flex-1 flex flex-col", (location.pathname === '/pos' || isCarta) ? "overflow-hidden" : "overflow-y-auto")}>
+        {!isKiosk && !isCarta && <Header />}
         <ErrorBoundary>
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className={cn("flex-1 flex flex-col min-h-0", isCarta && "overflow-y-auto")}>
             <Routes>
               <Route path="/" element={<CatalogView />} />
+              <Route path="/carta" element={<DigitalMenu />} />
               <Route path="/pos" element={<POSView />} />
               <Route path="/inventory" element={<InventoryView />} />
               <Route path="/bulk-edit" element={<BulkEditView />} />
