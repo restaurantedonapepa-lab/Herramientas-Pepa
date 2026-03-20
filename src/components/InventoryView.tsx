@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
-import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles, MoreVertical, FileSpreadsheet, ArrowLeft } from 'lucide-react';
+import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles, MoreVertical, FileSpreadsheet, ArrowLeft, Upload, Image as ImageIcon } from 'lucide-react';
+import { ImageUpload } from './ImageUpload';
 import Swal from 'sweetalert2';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -19,6 +20,7 @@ export const InventoryView: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isProductActive, setIsProductActive] = useState(true);
+  const [uploadedImageId, setUploadedImageId] = useState<string>('');
   const [showIngredientList, setShowIngredientList] = useState(false);
   const [isQuickCreatingIngredient, setIsQuickCreatingIngredient] = useState(false);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -474,6 +476,7 @@ export const InventoryView: React.FC = () => {
                     <button onClick={() => { 
                       setEditingItem(prod); 
                       setIsProductActive(prod.active ?? true);
+                      setUploadedImageId(prod.imageId || '');
                       setIsModalOpen(true); 
                     }} className="text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition"><Edit2 className="w-4 h-4" /></button>
                     <button onClick={() => handleDeleteProduct(prod.id)} className="text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
@@ -508,6 +511,7 @@ export const InventoryView: React.FC = () => {
         onClick={() => {
           setEditingItem(null);
           setIsProductActive(true);
+          setUploadedImageId('');
           setIsModalOpen(true);
         }}
         className={cn(
@@ -559,7 +563,13 @@ export const InventoryView: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2">
                       <label className="block text-sm font-bold text-gray-700 mb-1">Nombre del Plato</label>
-                      <input name="name" defaultValue={editingItem?.name} required className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-red-500 outline-none" />
+                      <input 
+                        name="name" 
+                        id="productNameInput"
+                        defaultValue={editingItem?.name} 
+                        required 
+                        className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-red-500 outline-none" 
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-bold text-gray-700 mb-1">Precio</label>
@@ -570,8 +580,16 @@ export const InventoryView: React.FC = () => {
                       <input name="category" defaultValue={editingItem?.category} required className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-red-500 outline-none" />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-sm font-bold text-gray-700 mb-1">ID Imagen (Google Drive)</label>
-                      <input name="imageId" defaultValue={editingItem?.imageId} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-red-500 outline-none" />
+                      <label className="block text-sm font-bold text-gray-700 mb-1">Imagen del Plato (Google Drive)</label>
+                      <ImageUpload 
+                        defaultValue={editingItem?.imageId} 
+                        onUploadSuccess={(id) => setUploadedImageId(id)} 
+                        productName={(document.getElementById('productNameInput') as HTMLInputElement)?.value || editingItem?.name}
+                      />
+                      <input type="hidden" name="imageId" value={uploadedImageId || editingItem?.imageId || ''} />
+                      <p className="text-[10px] text-gray-400 mt-2 font-bold uppercase">
+                        ID Actual: <span className="text-gray-600">{uploadedImageId || editingItem?.imageId || 'Ninguna'}</span>
+                      </p>
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-bold text-gray-700 mb-1">Descripción</label>

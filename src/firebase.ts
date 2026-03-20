@@ -113,8 +113,13 @@ export const logout = () => signOut(auth);
 const DEFAULT_IMG_ID = "1CHcrsjPdVxniofL05haOngroR7ulBV7n";
 
 export const getDriveImageUrl = (imageId: string | undefined) => {
-  const id = imageId || DEFAULT_IMG_ID;
-  return `https://lh3.googleusercontent.com/d/${id}=w400-h400-c`;
+  if (!imageId) return `https://lh3.googleusercontent.com/d/${DEFAULT_IMG_ID}=w400-h400-c`;
+  
+  // Si es una URL completa (de Firebase Storage), la devolvemos tal cual
+  if (imageId.startsWith('http')) return imageId;
+  
+  // Si es un ID de Drive
+  return `https://lh3.googleusercontent.com/d/${imageId}=w400-h400-c`;
 };
 
 export const ensureUserProfile = async (user: any) => {
