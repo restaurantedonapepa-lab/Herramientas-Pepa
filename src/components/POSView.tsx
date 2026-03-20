@@ -774,6 +774,13 @@ export const POSView: React.FC = () => {
           }
         }
         await updateDoc(doc(db, 'sales', saleId), { status: 'cancelled' });
+        
+        // Si es un crédito, buscar la mesa de crédito correspondiente y borrarla
+        const creditTable = tables.find(t => t.isCredit && t.saleId === saleId);
+        if (creditTable) {
+          await deleteDoc(doc(db, 'tables', creditTable.id));
+        }
+
         Swal.fire('Anulada', 'La venta ha sido anulada e inventario devuelto.', 'success');
         fetchHistoryData();
         if (showReportsModal) fetchReportData();
@@ -1257,28 +1264,90 @@ export const POSView: React.FC = () => {
         note: '' 
       });
     }
+
+    // Si es un crédito, descontar inventario inmediatamente y actualizar la venta
+    if (activeTable.isCredit) {
+      if (product.recipe) {
+        for (const recipeItem of product.recipe) {
+          await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+            stock: increment(-recipeItem.quantity) 
+          });
+        }
+      }
+      
+      if (activeTable.saleId) {
+        const newTotal = newItems.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+        await updateDoc(doc(db, 'sales', activeTable.saleId), {
+          items: newItems,
+          total: newTotal
+        });
+      }
+    }
+
     await updateDoc(doc(db, 'tables', activeTableId), { items: newItems, status: 'busy', lastUpdate: serverTimestamp() });
     setSearchTerm('');
   };
 
   const updateItemQty = async (productId: string, delta: number) => {
     if (!activeTableId || !activeTable) return;
+    
+    const itemToUpdate = activeTable.items.find(i => i.productId === productId);
+    if (!itemToUpdate) return;
+
+    // Si es un crédito, descontar/devolver inventario y actualizar la venta
+    if (activeTable.isCredit) {
+      const product = products.find(p => p.id === productId);
+      if (product?.recipe) {
+        // Si delta es positivo, descuenta. Si es negativo, devuelve.
+        for (const recipeItem of product.recipe) {
+          await updateDoc(doc(db, 'ingredients', recipeItem.ingredientId), { 
+            stock: increment(-(recipeItem.quantity * delta)) 
+          });
+        }
+      }
+    }
+
     const newItems = activeTable.items.map(item => {
       if (item.productId === productId) return { ...item, quantity: Math.max(0, item.quantity + delta) };
       return item;
     }).filter(item => item.quantity > 0);
+
+    if (activeTable.isCredit && activeTable.saleId) {
+      const newTotal = newItems.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+      await updateDoc(doc(db, 'sales', activeTable.saleId), {
+        items: newItems,
+        total: newTotal
+      });
+    }
+
     await updateDoc(doc(db, 'tables', activeTableId), { items: newItems, status: newItems.length > 0 ? 'busy' : 'free', lastUpdate: serverTimestamp() });
   };
 
   const updateItemNote = async (productId: string, note: string) => {
     if (!activeTableId || !activeTable) return;
     const newItems = activeTable.items.map(item => item.productId === productId ? { ...item, note } : item);
+    
+    if (activeTable.isCredit && activeTable.saleId) {
+      await updateDoc(doc(db, 'sales', activeTable.saleId), {
+        items: newItems
+      });
+    }
+
     await updateDoc(doc(db, 'tables', activeTableId), { items: newItems });
   };
 
   const updateItemPrice = async (productId: string, price: number) => {
     if (!activeTableId || !activeTable) return;
     const newItems = activeTable.items.map(item => item.productId === productId ? { ...item, price } : item);
+    
+    if (activeTable.isCredit && activeTable.saleId) {
+      const newTotal = newItems.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+      await updateDoc(doc(db, 'sales', activeTable.saleId), {
+        items: newItems,
+        total: newTotal
+      });
+    }
+
     await updateDoc(doc(db, 'tables', activeTableId), { items: newItems });
   };
 
