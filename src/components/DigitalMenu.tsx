@@ -53,8 +53,8 @@ const FlyingImage: React.FC<{ animation: FlyingAnimation }> = ({ animation }) =>
       }}
       transition={{ duration: 1, ease: "backOut" }}
       className={cn(
-        "fixed z-[9999] w-12 h-12 rounded-full flex items-center justify-center text-white pointer-events-none shadow-[0_0_20px_rgba(249,115,22,0.5)] border-2 border-white/20",
-        animation.target === 'cart' ? "bg-orange-500" : "bg-red-600"
+        "fixed z-[9999] w-12 h-12 rounded-full flex items-center justify-center text-white pointer-events-none shadow-[0_0_20px_rgba(220,38,38,0.5)] border-2 border-white/20",
+        animation.target === 'cart' ? "bg-red-600" : "bg-red-600"
       )}
     >
       {animation.target === 'cart' ? <ShoppingCart className="w-6 h-6" /> : <Heart className="w-6 h-6 fill-current" />}
@@ -71,12 +71,21 @@ export const DigitalMenu: React.FC = () => {
   const [productOrder, setProductOrder] = useState<string[]>([]);
   const [showCart, setShowCart] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [notifications, setNotifications] = useState<{ id: string, message: string, type: 'cart' | 'favorite' }[]>([]);
 
   const { 
     cart, favorites, addToCart, removeFromCart, updateQuantity, total, itemCount, 
     toggleFavorite, isFavorite, triggerFlyAnimation, animations,
     setShowCheckoutForm, searchTerm, setSearchTerm
   } = useCart();
+
+  const addNotification = (message: string, type: 'cart' | 'favorite') => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setNotifications(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 3000);
+  };
 
   // Fetch Products
   useEffect(() => {
@@ -187,7 +196,7 @@ export const DigitalMenu: React.FC = () => {
           className="flex-1 min-w-0"
         >
           <div className="flex items-center gap-1.5 mb-0.5">
-            <h3 className="text-[14px] font-bold text-white group-hover:text-orange-400 transition-colors truncate">
+            <h3 className="text-[14px] font-bold text-white group-hover:text-red-600 transition-colors truncate">
               {product.name}
             </h3>
           </div>
@@ -198,7 +207,7 @@ export const DigitalMenu: React.FC = () => {
 
         {/* Price and Actions */}
         <div className="flex items-center gap-3 flex-shrink-0">
-          <span className="text-[14px] font-black text-orange-500">
+          <span className="text-[14px] font-black text-red-600">
             ${getProductWebPrice(product).toLocaleString()}
           </span>
           
@@ -208,13 +217,14 @@ export const DigitalMenu: React.FC = () => {
                 toggleFavorite(product);
                 if (!isFavorite(product.id)) {
                   triggerFlyAnimation(e, '', 'favorites');
+                  addNotification(`${product.name} añadido a favoritos`, 'favorite');
                 }
               }}
               className={cn(
                 "p-1.5 rounded-md transition-all",
                 isFavorite(product.id) 
-                  ? "text-red-500" 
-                  : "text-gray-700 hover:text-red-500"
+                  ? "text-red-600" 
+                  : "text-gray-700 hover:text-red-600"
               )}
             >
               <Heart className={cn("w-3 h-3", isFavorite(product.id) && "fill-current")} />
@@ -224,8 +234,9 @@ export const DigitalMenu: React.FC = () => {
                 const finalPrice = getProductWebPrice(product);
                 addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
                 triggerFlyAnimation(e, '', 'cart');
+                addNotification(`${product.name} añadido al pedido`, 'cart');
               }}
-              className="p-1.5 text-orange-500 hover:text-orange-400 active:scale-90 transition-all"
+              className="p-1.5 text-red-600 hover:text-red-500 active:scale-90 transition-all"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -258,13 +269,34 @@ export const DigitalMenu: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-orange-500/30">
+    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-red-600/30">
+      {/* Notifications */}
+      <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 w-full max-w-xs px-4">
+        <AnimatePresence>
+          {notifications.map(n => (
+            <motion.div
+              key={n.id}
+              initial={{ opacity: 0, y: -20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "px-4 py-3 rounded-2xl shadow-2xl border border-white/10 flex items-center gap-3 backdrop-blur-md",
+                n.type === 'cart' ? "bg-red-600 text-white" : "bg-white text-gray-900"
+              )}
+            >
+              {n.type === 'cart' ? <ShoppingCart className="w-4 h-4" /> : <Heart className="w-4 h-4 text-red-600 fill-current" />}
+              <span className="text-xs font-black uppercase tracking-tight">{n.message}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
       {/* Hero Section */}
       <section className="relative h-[25vh] flex items-center justify-center overflow-hidden">
         <div className="absolute inset-0 z-0">
@@ -283,18 +315,16 @@ export const DigitalMenu: React.FC = () => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.8 }}
           >
-            <div className="w-14 h-14 mx-auto mb-3 bg-white rounded-full p-1.5 shadow-2xl shadow-orange-500/20">
+            <div className="w-14 h-14 mx-auto mb-3 bg-white rounded-full p-1.5 shadow-2xl shadow-red-600/20">
               <img 
-                src="https://i.ibb.co/vB8S88S/logo-pepa.png" 
+                src="https://lh3.googleusercontent.com/d/1wqVtaAyck4GGizYQZjj-gEi0y__9PYeh=w40-h40-c" 
                 alt="Doña Pepa Logo" 
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://cdn-icons-png.flaticon.com/512/3448/3448609.png';
-                }}
+                className="w-full h-full object-contain rounded-lg"
+                referrerPolicy="no-referrer"
               />
             </div>
             <h1 className="text-2xl md:text-4xl font-black tracking-tighter uppercase mb-0.5">
-              Menú <span className="text-orange-500">Doña Pepa</span>
+              Menú <span className="text-red-600">Doña Pepa</span>
             </h1>
             <p className="text-gray-500 text-[8px] md:text-[9px] tracking-[0.5em] uppercase font-bold">
               Sabor Tradicional • Desde 1957
@@ -313,7 +343,7 @@ export const DigitalMenu: React.FC = () => {
             {selectedCategory && searchTerm.length === 0 && (
               <button 
                 onClick={() => setSelectedCategory(null)}
-                className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-orange-500 hover:bg-white/10 transition-all"
+                className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-red-600 hover:bg-white/10 transition-all"
               >
                 <ChevronUp className="w-5 h-5 -rotate-90" />
               </button>
@@ -321,13 +351,13 @@ export const DigitalMenu: React.FC = () => {
             
             {/* Search Bar */}
             <div className="relative flex-1 group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-orange-500 transition-colors" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-red-600 transition-colors" />
               <input 
                 type="text"
                 placeholder="Buscar plato..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-[14px] focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:bg-white/10 transition-all"
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-[14px] focus:outline-none focus:ring-2 focus:ring-red-600/50 focus:bg-white/10 transition-all"
               />
             </div>
           </div>
@@ -341,12 +371,12 @@ export const DigitalMenu: React.FC = () => {
                 <button
                   key={cat}
                   onClick={() => scrollToCategory(cat)}
-                  className="flex flex-col items-center justify-center p-2 rounded-xl border bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:border-white/20 transition-all text-center gap-1.5 shrink-0 aspect-square"
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:border-white/20 transition-all text-center gap-2 shrink-0 aspect-square"
                 >
-                  <div className="p-1.5 rounded-lg bg-orange-500/10 text-orange-500">
-                    <Utensils className="w-4 h-4" />
+                  <div className="p-2 rounded-lg bg-red-600/10 text-red-600">
+                    <Utensils className="w-6 h-6" />
                   </div>
-                  <span className="text-[9px] font-black uppercase tracking-tighter leading-none line-clamp-2 text-gray-400">
+                  <span className="text-[14px] font-black uppercase tracking-tighter leading-none line-clamp-2 text-gray-400">
                     {cat}
                   </span>
                 </button>
@@ -362,7 +392,7 @@ export const DigitalMenu: React.FC = () => {
           /* Search Results View */
           <section className="space-y-6">
             <div className="flex items-center gap-2 mb-4">
-              <div className="p-1 bg-orange-500/10 rounded text-orange-500">
+              <div className="p-1 bg-red-600/10 rounded text-red-600">
                 <Search className="w-3 h-3" />
               </div>
               <h2 className="text-base font-black uppercase tracking-tight">
@@ -380,7 +410,7 @@ export const DigitalMenu: React.FC = () => {
           /* Category Content View */
           <section key={selectedCategory} className="scroll-mt-24">
             <div className="flex items-center gap-2 mb-4">
-              <div className="p-1 bg-orange-500/10 rounded text-orange-500">
+              <div className="p-1 bg-red-600/10 rounded text-red-600">
                 <Utensils className="w-3 h-3" />
               </div>
               <h2 className="text-base font-black uppercase tracking-tight">
@@ -399,7 +429,7 @@ export const DigitalMenu: React.FC = () => {
           /* Initial View (Empty or Welcome) */
           <div className="text-center py-20">
             <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Utensils className="w-8 h-8 text-orange-500/50" />
+              <Utensils className="w-8 h-8 text-red-600/50" />
             </div>
             <h2 className="text-xl font-black uppercase tracking-widest mb-2">Bienvenido</h2>
             <p className="text-gray-500 text-sm font-bold uppercase tracking-widest">Selecciona una categoría para ver el menú</p>
@@ -446,11 +476,11 @@ export const DigitalMenu: React.FC = () => {
         <button 
           id="cart-button"
           onClick={() => setShowCart(true)}
-          className="w-12 h-12 bg-gray-900 text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform relative"
+          className="w-12 h-12 bg-red-600 text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform relative"
         >
           <ShoppingCart className="w-6 h-6" />
           {itemCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-lg">
+            <span className="absolute -top-1 -right-1 bg-white text-red-600 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-lg">
               {itemCount}
             </span>
           )}
@@ -504,11 +534,11 @@ export const DigitalMenu: React.FC = () => {
                     <div key={product.id} className="flex gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl group relative">
                       <div className="flex-1">
                         <h3 className="font-bold text-[11px] text-white uppercase tracking-tight">{product.name}</h3>
-                        <p className="text-[10px] font-black text-orange-500 mt-1">${product.price.toLocaleString()}</p>
+                        <p className="text-[10px] font-black text-red-600 mt-1">${product.price.toLocaleString()}</p>
                         <Link 
                           to={`/${product.slug || product.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`}
                           onClick={() => setShowFavorites(false)}
-                          className="text-[8px] font-black text-gray-500 hover:text-orange-500 transition uppercase tracking-widest mt-3 block"
+                          className="text-[8px] font-black text-gray-500 hover:text-red-600 transition uppercase tracking-widest mt-3 block"
                         >
                           Ver detalle
                         </Link>
@@ -547,7 +577,7 @@ export const DigitalMenu: React.FC = () => {
             >
               <div className="p-6 border-b border-white/5 flex justify-between items-center">
                 <h2 className="text-xl font-black text-white flex items-center gap-2 uppercase tracking-tight">
-                  <ShoppingCart className="w-5 h-5 text-orange-500" /> Tu Pedido
+                  <ShoppingCart className="w-5 h-5 text-red-600" /> Tu Pedido
                 </h2>
                 <button onClick={() => setShowCart(false)} className="p-2 hover:bg-white/5 rounded-full transition">
                   <X className="w-6 h-6 text-gray-500" />
@@ -570,18 +600,18 @@ export const DigitalMenu: React.FC = () => {
                     <div key={item.productId} className="flex gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
                       <div className="flex-1">
                         <h3 className="font-bold text-[11px] text-white uppercase tracking-tight">{item.name}</h3>
-                        <p className="text-[10px] font-black text-orange-500 mt-1">${item.price.toLocaleString()}</p>
+                        <p className="text-[10px] font-black text-red-600 mt-1">${item.price.toLocaleString()}</p>
                         <div className="flex items-center gap-3 mt-3">
                           <button 
                             onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                            className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-orange-500 transition"
+                            className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 transition"
                           >
                             -
                           </button>
                           <span className="font-black text-xs text-white">{item.quantity}</span>
                           <button 
                             onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                            className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-orange-500 transition"
+                            className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 transition"
                           >
                             +
                           </button>
@@ -602,11 +632,11 @@ export const DigitalMenu: React.FC = () => {
                 <div className="p-6 border-t border-white/5 bg-white/[0.01]">
                   <div className="flex justify-between items-center mb-6">
                     <span className="text-gray-600 font-black uppercase tracking-widest text-[10px]">Total a pagar</span>
-                    <span className="text-2xl font-black text-orange-500">${total.toLocaleString()}</span>
+                    <span className="text-2xl font-black text-red-600">${total.toLocaleString()}</span>
                   </div>
                   <button 
                     onClick={() => { setShowCart(false); setShowCheckoutForm(true); }}
-                    className="w-full py-4 bg-orange-500 text-white font-black text-sm rounded-2xl shadow-xl shadow-orange-500/20 hover:bg-orange-600 transition uppercase tracking-widest"
+                    className="w-full py-4 bg-red-600 text-white font-black text-sm rounded-2xl shadow-xl shadow-red-600/20 hover:bg-red-700 transition uppercase tracking-widest"
                   >
                     FINALIZAR PEDIDO
                   </button>
@@ -637,17 +667,17 @@ export const DigitalMenu: React.FC = () => {
         <div className="max-w-4xl mx-auto text-center space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1">
-              <Clock className="w-3 h-3 text-orange-500/50 mx-auto" />
+              <Clock className="w-3 h-3 text-red-600/50 mx-auto" />
               <h4 className="font-bold uppercase tracking-widest text-[8px] text-gray-500">Horario</h4>
               <p className="text-gray-700 text-[8px]">Lun - Dom | 8:00 AM - 8:30 PM</p>
             </div>
             <div className="space-y-1">
-              <MapPin className="w-3 h-3 text-orange-500/50 mx-auto" />
+              <MapPin className="w-3 h-3 text-red-600/50 mx-auto" />
               <h4 className="font-bold uppercase tracking-widest text-[8px] text-gray-500">Ubicación</h4>
               <p className="text-gray-700 text-[8px]">Cúcuta, Norte de Santander</p>
             </div>
             <div className="space-y-1">
-              <Phone className="w-3 h-3 text-orange-500/50 mx-auto" />
+              <Phone className="w-3 h-3 text-red-600/50 mx-auto" />
               <h4 className="font-bold uppercase tracking-widest text-[8px] text-gray-500">Contacto</h4>
               <p className="text-gray-700 text-[8px]">www.donapepacucuta.com</p>
             </div>
