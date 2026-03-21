@@ -43,18 +43,21 @@ const FlyingImage: React.FC<{ animation: FlyingAnimation }> = ({ animation }) =>
 
   return (
     <motion.div
-      initial={{ x: animation.x, y: animation.y, scale: 1, rotate: 0, opacity: 1 }}
+      initial={{ x: animation.x - 20, y: animation.y - 20, scale: 0, rotate: -45, opacity: 0 }}
       animate={{ 
-        x: targetPos.x - 20, 
-        y: targetPos.y - 20, 
-        scale: 0.2, 
-        rotate: 360, 
-        opacity: 0 
+        x: [animation.x - 20, animation.x - 20, targetPos.x - 25],
+        y: [animation.y - 20, animation.y - 60, targetPos.y - 25],
+        scale: [0, 1.5, 0.3], 
+        rotate: [0, 180, 720], 
+        opacity: [0, 1, 0] 
       }}
-      transition={{ duration: 0.8, ease: "easeInOut" }}
-      className="fixed z-[9999] w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center text-white pointer-events-none shadow-xl"
+      transition={{ duration: 1, ease: "backOut" }}
+      className={cn(
+        "fixed z-[9999] w-12 h-12 rounded-full flex items-center justify-center text-white pointer-events-none shadow-[0_0_20px_rgba(249,115,22,0.5)] border-2 border-white/20",
+        animation.target === 'cart' ? "bg-orange-500" : "bg-red-600"
+      )}
     >
-      {animation.target === 'cart' ? <ShoppingCart className="w-5 h-5" /> : <Heart className="w-5 h-5 fill-current" />}
+      {animation.target === 'cart' ? <ShoppingCart className="w-6 h-6" /> : <Heart className="w-6 h-6 fill-current" />}
     </motion.div>
   );
 };
@@ -62,11 +65,10 @@ const FlyingImage: React.FC<{ animation: FlyingAnimation }> = ({ animation }) =>
 export const DigitalMenu: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [productOrder, setProductOrder] = useState<string[]>([]);
-  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [showCart, setShowCart] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
 
@@ -139,7 +141,7 @@ export const DigitalMenu: React.FC = () => {
       if (indexB === -1) return -1;
       return indexA - indexB;
     });
-    return ['Todos', ...sorted];
+    return sorted;
   }, [products, categoryOrder]);
 
   // Filtering Logic
@@ -147,7 +149,8 @@ export const DigitalMenu: React.FC = () => {
     let filtered = products.filter(p => {
       const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                            p.description.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesSearch;
+      const matchesCategory = !selectedCategory || p.category === selectedCategory;
+      return matchesSearch && (searchTerm.length > 0 || matchesCategory);
     });
 
     return filtered.sort((a, b) => {
@@ -162,29 +165,75 @@ export const DigitalMenu: React.FC = () => {
 
   const scrollToCategory = (cat: string) => {
     setSelectedCategory(cat);
-    setShowCategoryMenu(false);
-    if (cat === 'Todos') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-    const element = document.getElementById(cat);
-    if (element) {
-      const offset = 100;
-      const bodyRect = document.body.getBoundingClientRect().top;
-      const elementRect = element.getBoundingClientRect().top;
-      const elementPosition = elementRect - bodyRect;
-      const offsetPosition = elementPosition - offset;
-
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: 'smooth'
-      });
-    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const getProductWebPrice = (product: Product) => {
     return product.price + (product.packagingPrice || 0);
   };
+
+  const ProductItem = ({ product, idx }: { product: Product, idx: number }) => (
+    <motion.div
+      initial={{ opacity: 0, y: 5 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ delay: idx * 0.01 }}
+      className="group relative p-2.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] hover:border-white/10 transition-all"
+    >
+      <div className="flex justify-between items-center gap-3">
+        {/* Product Info */}
+        <Link 
+          to={`/${product.slug || product.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`}
+          className="flex-1 min-w-0"
+        >
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <h3 className="text-[14px] font-bold text-white group-hover:text-orange-400 transition-colors truncate">
+              {product.name}
+            </h3>
+          </div>
+          <p className="text-[12px] text-gray-600 line-clamp-1 leading-relaxed">
+            {product.description}
+          </p>
+        </Link>
+
+        {/* Price and Actions */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-[14px] font-black text-orange-500">
+            ${getProductWebPrice(product).toLocaleString()}
+          </span>
+          
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={(e) => {
+                toggleFavorite(product);
+                if (!isFavorite(product.id)) {
+                  triggerFlyAnimation(e, '', 'favorites');
+                }
+              }}
+              className={cn(
+                "p-1.5 rounded-md transition-all",
+                isFavorite(product.id) 
+                  ? "text-red-500" 
+                  : "text-gray-700 hover:text-red-500"
+              )}
+            >
+              <Heart className={cn("w-3 h-3", isFavorite(product.id) && "fill-current")} />
+            </button>
+            <button 
+              onClick={(e) => {
+                const finalPrice = getProductWebPrice(product);
+                addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
+                triggerFlyAnimation(e, '', 'cart');
+              }}
+              className="p-1.5 text-orange-500 hover:text-orange-400 active:scale-90 transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
 
   const groupedProducts = useMemo(() => {
     const groups: { [key: string]: Product[] } = {};
@@ -254,163 +303,110 @@ export const DigitalMenu: React.FC = () => {
         </div>
       </section>
 
-      {/* Sticky Header with Search and Menu Button */}
+      {/* Sticky Header with Search */}
       <div className={cn(
         "sticky top-0 z-50 transition-all duration-300",
         isScrolled ? "bg-[#0a0a0a]/95 backdrop-blur-md shadow-2xl" : "bg-transparent"
       )}>
-        <div className="max-w-4xl mx-auto px-4 py-3">
-          <div className="flex items-center gap-2">
-            {/* Menu Button */}
-            <div className="relative">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          <div className="flex items-center gap-3">
+            {selectedCategory && searchTerm.length === 0 && (
               <button 
-                onClick={() => setShowCategoryMenu(!showCategoryMenu)}
+                onClick={() => setSelectedCategory(null)}
                 className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-orange-500 hover:bg-white/10 transition-all"
               >
-                <MenuIcon className="w-5 h-5" />
+                <ChevronUp className="w-5 h-5 -rotate-90" />
               </button>
-
-              <AnimatePresence>
-                {showCategoryMenu && (
-                  <>
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      onClick={() => setShowCategoryMenu(false)}
-                      className="fixed inset-0 z-40"
-                    />
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute left-0 mt-2 w-48 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl py-2 z-50 overflow-hidden"
-                    >
-                      <div className="px-4 py-2 border-b border-white/5 mb-1">
-                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Categorías</p>
-                      </div>
-                      <div className="max-h-[60vh] overflow-y-auto no-scrollbar">
-                        {categories.map((cat) => (
-                          <button
-                            key={cat}
-                            onClick={() => scrollToCategory(cat)}
-                            className={cn(
-                              "w-full text-left px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors",
-                              selectedCategory === cat ? "text-orange-500 bg-orange-500/5" : "text-gray-400 hover:bg-white/5"
-                            )}
-                          >
-                            {cat}
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-
+            )}
+            
             {/* Search Bar */}
             <div className="relative flex-1 group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 group-focus-within:text-orange-500 transition-colors" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-orange-500 transition-colors" />
               <input 
                 type="text"
                 placeholder="Buscar plato..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-[11px] focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:bg-white/10 transition-all"
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-[14px] focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:bg-white/10 transition-all"
               />
             </div>
           </div>
         </div>
+
+        {/* Category Grid (TPV Style) - Hidden when searching or category selected */}
+        {searchTerm.length === 0 && !selectedCategory && (
+          <div className="max-w-4xl mx-auto px-4 pb-4">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 transition-all duration-500">
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => scrollToCategory(cat)}
+                  className="flex flex-col items-center justify-center p-2 rounded-xl border bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:border-white/20 transition-all text-center gap-1.5 shrink-0 aspect-square"
+                >
+                  <div className="p-1.5 rounded-lg bg-orange-500/10 text-orange-500">
+                    <Utensils className="w-4 h-4" />
+                  </div>
+                  <span className="text-[9px] font-black uppercase tracking-tighter leading-none line-clamp-2 text-gray-400">
+                    {cat}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Menu Content */}
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-10">
-        {sortedCategoryKeys.map((category) => (
-          <section key={category} id={category} className="scroll-mt-24">
+        {searchTerm.length > 0 ? (
+          /* Search Results View */
+          <section className="space-y-6">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-1 bg-orange-500/10 rounded text-orange-500">
+                <Search className="w-3 h-3" />
+              </div>
+              <h2 className="text-base font-black uppercase tracking-tight">
+                Resultados para "{searchTerm}"
+              </h2>
+              <div className="flex-1 h-px bg-gradient-to-r from-white/10 to-transparent" />
+            </div>
+            <div className="grid gap-2">
+              {filteredProducts.map((product, idx) => (
+                <ProductItem key={product.id} product={product} idx={idx} />
+              ))}
+            </div>
+          </section>
+        ) : selectedCategory ? (
+          /* Category Content View */
+          <section key={selectedCategory} className="scroll-mt-24">
             <div className="flex items-center gap-2 mb-4">
               <div className="p-1 bg-orange-500/10 rounded text-orange-500">
                 <Utensils className="w-3 h-3" />
               </div>
               <h2 className="text-base font-black uppercase tracking-tight">
-                {category}
+                {selectedCategory}
               </h2>
               <div className="flex-1 h-px bg-gradient-to-r from-white/10 to-transparent" />
             </div>
 
             <div className="grid gap-2">
-              {groupedProducts[category].map((product, idx) => (
-                <motion.div
-                  key={product.id}
-                  initial={{ opacity: 0, y: 5 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: idx * 0.01 }}
-                  className="group relative p-2.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] hover:border-white/10 transition-all"
-                >
-                  <div className="flex justify-between items-center gap-3">
-                    {/* Product Info */}
-                    <Link 
-                      to={`/${product.slug || product.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`}
-                      className="flex-1 min-w-0"
-                    >
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <h3 className="text-[11px] font-bold text-white group-hover:text-orange-400 transition-colors truncate">
-                          {product.name}
-                        </h3>
-                        <div className="flex items-center gap-0.5 text-orange-500/40">
-                          <Star className="w-2 h-2 fill-current" />
-                          <span className="text-[7px] font-black">4.9</span>
-                        </div>
-                      </div>
-                      <p className="text-[8px] text-gray-600 line-clamp-1 leading-relaxed">
-                        {product.description}
-                      </p>
-                    </Link>
-
-                    {/* Price and Actions */}
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <span className="text-xs font-black text-orange-500">
-                        ${getProductWebPrice(product).toLocaleString()}
-                      </span>
-                      
-                      <div className="flex items-center gap-1">
-                        <button 
-                          onClick={(e) => {
-                            toggleFavorite(product);
-                            if (!isFavorite(product.id)) {
-                              triggerFlyAnimation(e, '', 'favorites');
-                            }
-                          }}
-                          className={cn(
-                            "p-1.5 rounded-md transition-all",
-                            isFavorite(product.id) 
-                              ? "text-red-500" 
-                              : "text-gray-700 hover:text-red-500"
-                          )}
-                        >
-                          <Heart className={cn("w-3 h-3", isFavorite(product.id) && "fill-current")} />
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            const finalPrice = getProductWebPrice(product);
-                            addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
-                            triggerFlyAnimation(e, '', 'cart');
-                          }}
-                          className="p-1.5 text-orange-500 hover:text-orange-400 active:scale-90 transition-all"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
+              {groupedProducts[selectedCategory]?.map((product, idx) => (
+                <ProductItem key={product.id} product={product} idx={idx} />
               ))}
             </div>
           </section>
-        ))}
+        ) : (
+          /* Initial View (Empty or Welcome) */
+          <div className="text-center py-20">
+            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Utensils className="w-8 h-8 text-orange-500/50" />
+            </div>
+            <h2 className="text-xl font-black uppercase tracking-widest mb-2">Bienvenido</h2>
+            <p className="text-gray-500 text-sm font-bold uppercase tracking-widest">Selecciona una categoría para ver el menú</p>
+          </div>
+        )}
 
-        {filteredProducts.length === 0 && (
+        {searchTerm.length > 0 && filteredProducts.length === 0 && (
           <div className="text-center py-16">
             <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-3">
               <Search className="w-4 h-4 text-gray-800" />
