@@ -10,7 +10,7 @@ import {
   Search, Trash2, CreditCard, Banknote, QrCode, User, 
   Table as TableIcon, ShoppingCart, ArrowLeft, Plus, 
   Minus, MessageSquare, Edit2, Save, X, History, 
-  ChartLine, RefreshCw, CheckCircle2, 
+  ChartLine, RefreshCw, CheckCircle2, Calendar,
   LayoutGrid, UtensilsCrossed, Split, ChevronLeft, ChevronRight, Printer, Globe,
   FileText, Settings
 } from 'lucide-react';
@@ -123,6 +123,7 @@ export const POSView: React.FC = () => {
   const [reportTab, setReportTab] = useState<'ventas' | 'gastos' | 'graficos' | 'creditos'>('ventas');
   const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
   const [historyData, setHistoryData] = useState<Sale[]>([]);
+  const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]);
   const [lastImportBatch, setLastImportBatch] = useState<string | null>(localStorage.getItem('lastImportBatch'));
 
   const lookupCustomer = async (phone: string) => {
@@ -579,11 +580,12 @@ export const POSView: React.FC = () => {
 
   const fetchHistoryData = async () => {
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const start = new Date(historyDate + 'T00:00:00');
+      const end = new Date(historyDate + 'T23:59:59');
       const q = query(
         collection(db, 'sales'), 
-        where('timestamp', '>=', today),
+        where('timestamp', '>=', start),
+        where('timestamp', '<=', end),
         orderBy('timestamp', 'desc')
       );
       const snap = await getDocs(q);
@@ -594,7 +596,7 @@ export const POSView: React.FC = () => {
   };
 
   useEffect(() => { if (showReportsModal) fetchReportData(); }, [showReportsModal, reportRange]);
-  useEffect(() => { if (showHistoryModal) fetchHistoryData(); }, [showHistoryModal]);
+  useEffect(() => { if (showHistoryModal) fetchHistoryData(); }, [showHistoryModal, historyDate]);
 
   const importSalesFromCSV = async () => {
     const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRYxU0BBrkOIiAMI6IROxj0Nu8a7nHYjMbm3KEuYI3WdN_6Z5CXNuHxBquHLVgCAYtfsvRNszeyhyri/pub?gid=0&single=true&output=csv';
@@ -2301,6 +2303,15 @@ export const POSView: React.FC = () => {
               <div className="p-8 border-b flex justify-between items-center bg-gray-50">
                 <div className="flex items-center gap-4">
                   <h3 className="text-2xl font-black text-gray-800">Historial de Ventas</h3>
+                  <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+                    <Calendar className="w-4 h-4 text-blue-600" />
+                    <input 
+                      type="date" 
+                      value={historyDate}
+                      onChange={(e) => setHistoryDate(e.target.value)}
+                      className="text-sm font-bold text-gray-700 outline-none bg-transparent"
+                    />
+                  </div>
                 </div>
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
               </div>
