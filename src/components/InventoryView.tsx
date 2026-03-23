@@ -3,11 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, RecipeItem } from '../types';
-import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles, MoreVertical, FileSpreadsheet, ArrowLeft, Upload, Image as ImageIcon } from 'lucide-react';
+import { Plus, Edit2, Trash2, Package, UtensilsCrossed, Save, X, Search, Sparkles, MoreVertical, FileSpreadsheet, ArrowLeft, Upload, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { ImageUpload } from './ImageUpload';
 import Swal from 'sweetalert2';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,6 +26,7 @@ export const InventoryView: React.FC = () => {
   const [editingItem, setEditingItem] = useState<any>(null);
   const [isProductActive, setIsProductActive] = useState(true);
   const [uploadedImageId, setUploadedImageId] = useState<string>('');
+  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
   const [showIngredientList, setShowIngredientList] = useState(false);
   const [isQuickCreatingIngredient, setIsQuickCreatingIngredient] = useState(false);
   const [inventorySearch, setInventorySearch] = useState('');
@@ -325,6 +329,40 @@ export const InventoryView: React.FC = () => {
     setEditingItem({ ...editingItem, recipe: newRecipe });
   };
 
+  const generateAIDescription = async () => {
+    const nameInput = document.getElementById('productNameInput') as HTMLInputElement;
+    const categoryInput = document.getElementsByName('category')[0] as HTMLInputElement;
+    const descriptionInput = document.getElementsByName('description')[0] as HTMLTextAreaElement;
+
+    const name = nameInput?.value || editingItem?.name;
+    const category = categoryInput?.value || editingItem?.category;
+
+    if (!name) {
+      Swal.fire('Atención', 'Por favor ingresa el nombre del plato primero.', 'warning');
+      return;
+    }
+
+    setIsGeneratingDescription(true);
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Eres un experto redactor gastronómico para el restaurante 'Doña Pepa'. Crea una descripción corta (máximo 150 caracteres), provocativa y deliciosa para un plato llamado '${name}' de la categoría '${category || 'General'}'. Resalta el sabor tradicional y casero. No uses comillas.`,
+      });
+
+      const text = response.text;
+      if (text && descriptionInput) {
+        descriptionInput.value = text.trim();
+        // Trigger change event for any listeners
+        descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    } catch (error) {
+      console.error("Error generating description:", error);
+      Swal.fire('Error', 'No se pudo generar la descripción con IA.', 'error');
+    } finally {
+      setIsGeneratingDescription(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
@@ -606,7 +644,22 @@ export const InventoryView: React.FC = () => {
                       </p>
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-sm font-bold text-gray-700 mb-1">Descripción</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-sm font-bold text-gray-700">Descripción</label>
+                        <button 
+                          type="button"
+                          onClick={generateAIDescription}
+                          disabled={isGeneratingDescription}
+                          className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-600 hover:bg-red-50 px-3 py-1 rounded-full transition disabled:opacity-50"
+                        >
+                          {isGeneratingDescription ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3 h-3" />
+                          )}
+                          Generar con IA
+                        </button>
+                      </div>
                       <textarea name="description" defaultValue={editingItem?.description} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-red-500 outline-none h-20" />
                     </div>
                     <div className="flex flex-col gap-4 col-span-2">

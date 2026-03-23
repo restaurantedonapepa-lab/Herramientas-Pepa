@@ -11,7 +11,7 @@ import {
   Table as TableIcon, ShoppingCart, ArrowLeft, Plus, 
   Minus, MessageSquare, Edit2, Save, X, History, 
   ChartLine, RefreshCw, CheckCircle2, 
-  LayoutGrid, UtensilsCrossed, Split, ChevronRight, Printer, Globe,
+  LayoutGrid, UtensilsCrossed, Split, ChevronLeft, ChevronRight, Printer, Globe,
   FileText, Settings
 } from 'lucide-react';
 import { printerService } from '../services/PrinterService';
@@ -105,6 +105,7 @@ export const POSView: React.FC = () => {
   const [splitCount, setSplitCount] = useState<number>(1);
   const [isSplitting, setIsSplitting] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const reportScrollRef = useRef<HTMLDivElement>(null);
 
   // Payment States
   const [selectedItemsForPayment, setSelectedItemsForPayment] = useState<Record<string, number>>({});
@@ -1035,9 +1036,11 @@ export const POSView: React.FC = () => {
           </div>
 
           <div class="section-title">RESUMEN</div>
-          <div class="summary-row"><span>Efectivo:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span></div>
-          <div class="summary-row"><span>Nequi:</span> <span>$${(reportStats.salesByMethod['Nequi'] || 0).toLocaleString()}</span></div>
-          <div class="summary-row"><span>Tarjeta:</span> <span>$${(reportStats.salesByMethod['Tarjeta'] || 0).toLocaleString()}</span></div>
+          ${Object.entries(reportStats.salesByMethod)
+            .filter(([_, value]) => value > 0)
+            .map(([method, value]) => `
+              <div class="summary-row"><span>${method}:</span> <span>$${value.toLocaleString()}</span></div>
+            `).join('')}
           <div class="summary-row total"><span>TOTAL VENTAS (CAJA):</span> <span>$${reportStats.totalSales.toLocaleString()}</span></div>
           <div class="summary-row" style="color: #f59e0b;"><span>TOTAL CRÉDITOS:</span> <span>$${reportStats.totalCredits.toLocaleString()}</span></div>
           <div class="summary-row" style="color: #ef4444;"><span>TOTAL GASTOS:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span></div>
@@ -1955,7 +1958,7 @@ export const POSView: React.FC = () => {
               <div className="flex-1 p-6 lg:p-10 flex flex-col overflow-hidden">
                 <div className="flex justify-between items-center mb-4 lg:mb-8 flex-shrink-0"><h3 className="text-xl lg:text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
                 <div className="grid grid-cols-3 gap-3 mb-8 flex-shrink-0">
-                  {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Crédito', 'Mixto'].map(m => (
+                  {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
                     <button key={m} onClick={() => setPaymentMethod(m as any)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
                   ))}
                 </div>
@@ -2140,14 +2143,39 @@ export const POSView: React.FC = () => {
               <div className="flex-1 overflow-y-auto p-6 bg-white">
                 {reportTab === 'ventas' && (
                   <div className="space-y-6">
-                    {/* Payment Method Cards */}
-                    <div className="grid grid-cols-3 gap-4">
-                      {['Efectivo', 'Nequi', 'Tarjeta'].map(method => (
-                        <div key={method} className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-center">
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">{method}</p>
-                          <p className="text-xl font-black text-blue-600">${(reportStats.salesByMethod[method] || 0).toLocaleString()}</p>
-                        </div>
-                      ))}
+                    {/* Payment Method Cards with Scroll Controls */}
+                    <div className="relative group">
+                      <div className="absolute left-0 top-1/2 -translate-y-1/2 -ml-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => reportScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+                          className="p-2 bg-white shadow-lg rounded-full border border-gray-100 text-gray-600 hover:text-blue-600"
+                        >
+                          <ChevronLeft className="w-5 h-5" />
+                        </button>
+                      </div>
+                      
+                      <div 
+                        ref={reportScrollRef}
+                        className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x snap-mandatory"
+                      >
+                        {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Crédito']
+                          .filter(method => (reportStats.salesByMethod[method] || 0) > 0)
+                          .map(method => (
+                            <div key={method} className="flex-shrink-0 w-[160px] bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-center snap-start">
+                              <p className="text-[10px] font-black text-gray-400 uppercase mb-1">{method}</p>
+                              <p className="text-xl font-black text-blue-600">${(reportStats.salesByMethod[method] || 0).toLocaleString()}</p>
+                            </div>
+                          ))}
+                      </div>
+
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 -mr-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => reportScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+                          className="p-2 bg-white shadow-lg rounded-full border border-gray-100 text-gray-600 hover:text-blue-600"
+                        >
+                          <ChevronRight className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Sales Table */}

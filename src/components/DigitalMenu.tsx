@@ -15,10 +15,15 @@ import {
   Info,
   Menu as MenuIcon,
   X,
-  Trash2
+  Trash2,
+  User,
+  LogIn,
+  LogOut,
+  Users,
+  Globe
 } from 'lucide-react';
 import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, auth } from '../firebase';
+import { db, handleFirestoreError, OperationType, auth, loginWithGoogle, logout } from '../firebase';
 import { Product } from '../types';
 import { useCart, FlyingAnimation } from '../context/CartContext';
 import { Link } from 'react-router-dom';
@@ -71,13 +76,16 @@ export const DigitalMenu: React.FC = () => {
   const [productOrder, setProductOrder] = useState<string[]>([]);
   const [showCart, setShowCart] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<{ id: string, message: string, type: 'cart' | 'favorite' }[]>([]);
 
   const { 
     cart, favorites, addToCart, removeFromCart, updateQuantity, total, itemCount, 
     toggleFavorite, isFavorite, triggerFlyAnimation, animations,
-    setShowCheckoutForm, searchTerm, setSearchTerm
+    setShowCheckoutForm, searchTerm, setSearchTerm, userProfile
   } = useCart();
+
+  const user = auth.currentUser;
 
   const addNotification = (message: string, type: 'cart' | 'favorite') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -178,7 +186,8 @@ export const DigitalMenu: React.FC = () => {
   };
 
   const getProductWebPrice = (product: Product) => {
-    return product.price + (product.packagingPrice || 0);
+    const deliveryFeePerItem = 1000; // Recargo de domicilio solicitado: $1.000
+    return product.price + deliveryFeePerItem;
   };
 
   const ProductItem = ({ product, idx }: { product: Product, idx: number }) => (
@@ -207,7 +216,7 @@ export const DigitalMenu: React.FC = () => {
 
         {/* Price and Actions */}
         <div className="flex items-center gap-3 flex-shrink-0">
-          <span className="text-[14px] font-black text-red-600">
+          <span className="text-[14px] font-black text-white">
             ${getProductWebPrice(product).toLocaleString()}
           </span>
           
@@ -446,45 +455,126 @@ export const DigitalMenu: React.FC = () => {
         )}
       </main>
 
-      {/* Floating Action Buttons */}
-      <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-[60]">
-        {/* WhatsApp */}
-        <a 
-          href="https://wa.me/573123456789" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="w-10 h-10 bg-[#25D366] text-white rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition-transform"
-        >
-          <MessageCircle className="w-5 h-5" />
-        </a>
+      {/* Bottom Navigation Menu */}
+      <div className="fixed bottom-0 left-0 right-0 z-[100] bg-[#0a0a0a]/95 backdrop-blur-md border-t border-white/5 px-4 py-2 pb-safe">
+        <div className="max-w-md mx-auto flex items-center justify-between">
+          {/* WhatsApp */}
+          <a 
+            href="https://wa.me/573123456789" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-1 p-2 text-gray-400 hover:text-red-600 transition-colors"
+          >
+            <MessageCircle className="w-5 h-5" />
+            <span className="text-[10px] font-bold uppercase tracking-tighter">WhatsApp</span>
+          </a>
 
-        {/* Favorites */}
-        <button 
-          id="favorites-button"
-          onClick={() => setShowFavorites(true)}
-          className="w-10 h-10 bg-red-600 text-white rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition-transform relative"
-        >
-          <Heart className="w-5 h-5" />
-          {favorites.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-white text-red-600 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-lg border border-red-600">
-              {favorites.length}
-            </span>
-          )}
-        </button>
+          {/* Favorites */}
+          <button 
+            id="favorites-button"
+            onClick={() => setShowFavorites(true)}
+            className="flex flex-col items-center gap-1 p-2 text-gray-400 hover:text-red-600 transition-colors relative"
+          >
+            <Heart className="w-5 h-5" />
+            {favorites.length > 0 && (
+              <span className="absolute top-1 right-2 bg-red-600 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-lg">
+                {favorites.length}
+              </span>
+            )}
+            <span className="text-[10px] font-bold uppercase tracking-tighter">Favoritos</span>
+          </button>
 
-        {/* Cart */}
-        <button 
-          id="cart-button"
-          onClick={() => setShowCart(true)}
-          className="w-12 h-12 bg-red-600 text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform relative"
-        >
-          <ShoppingCart className="w-6 h-6" />
-          {itemCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-white text-red-600 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-lg">
-              {itemCount}
-            </span>
-          )}
-        </button>
+          {/* Cart */}
+          <button 
+            id="cart-button"
+            onClick={() => setShowCart(true)}
+            className="flex flex-col items-center gap-1 p-2 text-red-600 hover:text-red-500 transition-colors relative"
+          >
+            <div className="relative">
+              <ShoppingCart className="w-6 h-6" />
+              {itemCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-white text-red-600 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-lg">
+                  {itemCount}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-tighter">Pedido</span>
+          </button>
+
+          {/* Login / User Menu */}
+          <div className="relative">
+            <button 
+              onClick={() => {
+                if (user) {
+                  setShowUserMenu(!showUserMenu);
+                } else {
+                  loginWithGoogle();
+                }
+              }}
+              className="flex flex-col items-center gap-1 p-2 text-gray-400 hover:text-red-600 transition-colors"
+            >
+              {user ? (
+                <img 
+                  src={user.photoURL || ''} 
+                  alt={user.displayName || ''} 
+                  className="w-6 h-6 rounded-full border border-white/10"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <User className="w-5 h-5" />
+              )}
+              <span className="text-[10px] font-bold uppercase tracking-tighter">
+                {user ? 'Mi Cuenta' : 'Ingresar'}
+              </span>
+            </button>
+
+            <AnimatePresence>
+              {showUserMenu && user && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute bottom-full right-0 mb-2 w-48 bg-[#1a1a1a] rounded-2xl shadow-2xl border border-white/5 py-2 z-[110]"
+                >
+                  <div className="px-4 py-2 border-b border-white/5 mb-2">
+                    <p className="text-[10px] font-black text-gray-500 uppercase">Hola,</p>
+                    <p className="text-xs font-bold text-white truncate">{user.displayName}</p>
+                  </div>
+                  <button 
+                    onClick={() => { setShowFavorites(true); setShowUserMenu(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold text-gray-400 hover:text-white hover:bg-white/5 transition"
+                  >
+                    <Heart className="w-3 h-3 text-red-600" /> Mis Favoritos
+                  </button>
+                  {userProfile?.role === 'admin' && (
+                    <Link 
+                      to="/users" 
+                      className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold text-gray-400 hover:text-white hover:bg-white/5 transition"
+                      onClick={() => setShowUserMenu(false)}
+                    >
+                      <Users className="w-3 h-3 text-purple-600" /> Gestión Usuarios
+                    </Link>
+                  )}
+                  {['admin', 'mesero', 'cajero', 'cocina'].includes(userProfile?.role || '') && (
+                    <Link 
+                      to="/pos" 
+                      className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold text-gray-400 hover:text-white hover:bg-white/5 transition"
+                      onClick={() => setShowUserMenu(false)}
+                    >
+                      <Globe className="w-3 h-3 text-blue-600" /> Administración
+                    </Link>
+                  )}
+                  <button 
+                    onClick={() => { logout(); setShowUserMenu(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-600/10 transition mt-2 border-t border-white/5 pt-2"
+                  >
+                    <LogOut className="w-3 h-3" /> Cerrar Sesión
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
       {/* Flying Animations */}
@@ -534,7 +624,7 @@ export const DigitalMenu: React.FC = () => {
                     <div key={product.id} className="flex gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl group relative">
                       <div className="flex-1">
                         <h3 className="font-bold text-[11px] text-white uppercase tracking-tight">{product.name}</h3>
-                        <p className="text-[10px] font-black text-red-600 mt-1">${product.price.toLocaleString()}</p>
+                        <p className="text-[10px] font-black text-white mt-1">${getProductWebPrice(product).toLocaleString()}</p>
                         <Link 
                           to={`/${product.slug || product.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`}
                           onClick={() => setShowFavorites(false)}
@@ -600,7 +690,7 @@ export const DigitalMenu: React.FC = () => {
                     <div key={item.productId} className="flex gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
                       <div className="flex-1">
                         <h3 className="font-bold text-[11px] text-white uppercase tracking-tight">{item.name}</h3>
-                        <p className="text-[10px] font-black text-red-600 mt-1">${item.price.toLocaleString()}</p>
+                        <p className="text-[10px] font-black text-white mt-1">${item.price.toLocaleString()}</p>
                         <div className="flex items-center gap-3 mt-3">
                           <button 
                             onClick={() => updateQuantity(item.productId, item.quantity - 1)}
@@ -632,7 +722,7 @@ export const DigitalMenu: React.FC = () => {
                 <div className="p-6 border-t border-white/5 bg-white/[0.01]">
                   <div className="flex justify-between items-center mb-6">
                     <span className="text-gray-600 font-black uppercase tracking-widest text-[10px]">Total a pagar</span>
-                    <span className="text-2xl font-black text-red-600">${total.toLocaleString()}</span>
+                    <span className="text-2xl font-black text-white">${total.toLocaleString()}</span>
                   </div>
                   <button 
                     onClick={() => { setShowCart(false); setShowCheckoutForm(true); }}
@@ -655,7 +745,7 @@ export const DigitalMenu: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="fixed bottom-6 left-6 w-10 h-10 bg-white/5 backdrop-blur-md border border-white/10 text-white rounded-full flex items-center justify-center shadow-xl hover:bg-white/10 transition-all z-[60]"
+            className="fixed bottom-24 left-6 w-10 h-10 bg-white/5 backdrop-blur-md border border-white/10 text-white rounded-full flex items-center justify-center shadow-xl hover:bg-white/10 transition-all z-[60]"
           >
             <ChevronUp className="w-4 h-4" />
           </motion.button>
@@ -663,7 +753,7 @@ export const DigitalMenu: React.FC = () => {
       </AnimatePresence>
 
       {/* Footer */}
-      <footer className="bg-white/[0.01] border-t border-white/5 py-8 px-4">
+      <footer className="bg-white/[0.01] border-t border-white/5 py-8 px-4 pb-24">
         <div className="max-w-4xl mx-auto text-center space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1">

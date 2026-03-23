@@ -2,15 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Product } from '../types';
-import { Save, ArrowLeft, Loader2, Check, AlertCircle, Search } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, Check, AlertCircle, Search, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export const BulkEditView: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [editedProducts, setEditedProducts] = useState<{ [id: string]: Partial<Product> }>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const navigate = useNavigate();
 
@@ -34,6 +38,33 @@ export const BulkEditView: React.FC = () => {
         [field]: value
       }
     }));
+  };
+
+  const generateAIDescription = async (product: Product) => {
+    const currentData = { ...product, ...editedProducts[product.id] };
+    
+    if (!currentData.name) {
+      Swal.fire('Atención', 'El plato debe tener un nombre.', 'warning');
+      return;
+    }
+
+    setGeneratingId(product.id);
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Eres un experto redactor gastronómico para el restaurante 'Doña Pepa'. Crea una descripción corta (máximo 150 caracteres), provocativa y deliciosa para un plato llamado '${currentData.name}' de la categoría '${currentData.category || 'General'}'. Resalta el sabor tradicional y casero. No uses comillas.`,
+      });
+
+      const text = response.text;
+      if (text) {
+        handleFieldChange(product.id, 'description', text.trim());
+      }
+    } catch (error) {
+      console.error("Error generating description:", error);
+      Swal.fire('Error', 'No se pudo generar la descripción con IA.', 'error');
+    } finally {
+      setGeneratingId(null);
+    }
   };
 
   const handleSaveAll = async () => {
@@ -184,12 +215,26 @@ export const BulkEditView: React.FC = () => {
                       />
                     </td>
                     <td className="p-2">
-                      <textarea 
-                        value={currentData.description}
-                        onChange={(e) => handleFieldChange(product.id, 'description', e.target.value)}
-                        rows={1}
-                        className="w-full bg-transparent border-none focus:bg-white focus:ring-2 focus:ring-red-500 rounded p-2 text-xs font-medium outline-none resize-none overflow-hidden"
-                      />
+                      <div className="relative group/desc">
+                        <textarea 
+                          value={currentData.description}
+                          onChange={(e) => handleFieldChange(product.id, 'description', e.target.value)}
+                          rows={1}
+                          className="w-full bg-transparent border-none focus:bg-white focus:ring-2 focus:ring-red-500 rounded p-2 pr-8 text-xs font-medium outline-none resize-none overflow-hidden"
+                        />
+                        <button
+                          onClick={() => generateAIDescription(product)}
+                          disabled={generatingId === product.id}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-300 hover:text-red-600 transition-all opacity-0 group-hover/desc:opacity-100 disabled:opacity-50"
+                          title="Generar con IA"
+                        >
+                          {generatingId === product.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Sparkles className="w-3 h-3" />
+                          )}
+                        </button>
+                      </div>
                     </td>
                     <td className="p-4 text-center">
                       <input 
