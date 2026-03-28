@@ -117,13 +117,19 @@ export const POSView: React.FC = () => {
   });
   const [receivedAmount, setReceivedAmount] = useState<number>(0);
   const isFirstPaymentKeyPress = useRef(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const getTodayDate = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
 
   // Report States
-  const [reportRange, setReportRange] = useState({ start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] });
+  const [reportRange, setReportRange] = useState({ start: getTodayDate(), end: getTodayDate() });
   const [reportTab, setReportTab] = useState<'ventas' | 'gastos' | 'graficos' | 'creditos'>('ventas');
   const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
   const [historyData, setHistoryData] = useState<Sale[]>([]);
-  const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [historyDate, setHistoryDate] = useState(getTodayDate());
   const [lastImportBatch, setLastImportBatch] = useState<string | null>(localStorage.getItem('lastImportBatch'));
 
   const lookupCustomer = async (phone: string) => {
@@ -547,12 +553,15 @@ export const POSView: React.FC = () => {
 
   const saveBusinessSettings = async () => {
     if (!editingSettings) return;
+    setIsProcessing(true);
     try {
       await setDoc(doc(db, 'settings', 'business'), editingSettings);
       setShowSettingsModal(false);
       Swal.fire({ icon: 'success', title: 'Configuración Guardada', timer: 1500, showConfirmButton: false });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -748,6 +757,7 @@ export const POSView: React.FC = () => {
   };
 
   const deleteSale = async (saleId: string) => {
+    if (isProcessing) return;
     const result = await Swal.fire({
       title: '¿Anular Venta?',
       text: 'La venta aparecerá tachada en el historial y no se contará en los reportes.',
@@ -758,6 +768,7 @@ export const POSView: React.FC = () => {
     });
 
     if (result.isConfirmed) {
+      setIsProcessing(true);
       try {
         const saleSnap = await getDoc(doc(db, 'sales', saleId));
         if (saleSnap.exists()) {
@@ -790,6 +801,8 @@ export const POSView: React.FC = () => {
       } catch (error) {
         console.error('Error cancelling sale:', error);
         Swal.fire('Error', 'No se pudo anular la venta.', 'error');
+      } finally {
+        setIsProcessing(false);
       }
     }
   };
@@ -1044,6 +1057,12 @@ export const POSView: React.FC = () => {
               <div class="summary-row"><span>${method}:</span> <span>$${value.toLocaleString()}</span></div>
             `).join('')}
           <div class="summary-row total"><span>TOTAL VENTAS (CAJA):</span> <span>$${reportStats.totalSales.toLocaleString()}</span></div>
+          ${reportStats.totalCreditPayments > 0 ? `
+            <div class="summary-row" style="color: #3b82f6; font-size: 13px;">
+              <span>↳ Recaudo Créditos (Deuda Anterior):</span> 
+              <span>$${reportStats.totalCreditPayments.toLocaleString()}</span>
+            </div>
+          ` : ''}
           <div class="summary-row" style="color: #f59e0b;"><span>TOTAL CRÉDITOS:</span> <span>$${reportStats.totalCredits.toLocaleString()}</span></div>
           <div class="summary-row" style="color: #ef4444;"><span>TOTAL GASTOS:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span></div>
           <div class="summary-row balance"><span>BALANCE NETO (CAJA):</span> <span>$${reportStats.balance.toLocaleString()}</span></div>
@@ -1061,6 +1080,11 @@ export const POSView: React.FC = () => {
           </table>
 
           <div class="section-title">DETALLE PRODUCTOS</div>
+          ${reportStats.totalCreditPayments > 0 ? `
+            <div style="font-size: 10px; color: #666; margin-top: 5px; font-style: italic;">
+              * Nota: El detalle de productos no incluye los platos de los recaudos de créditos ($${reportStats.totalCreditPayments.toLocaleString()}).
+            </div>
+          ` : ''}
           <table>
             <thead>
               <tr>
@@ -1150,6 +1174,7 @@ export const POSView: React.FC = () => {
   const reportStats = useMemo(() => {
     const activeSales = reportData.sales.filter(s => s.status !== 'cancelled');
     const totalSales = activeSales.filter(s => s.paymentMethod !== 'Crédito').reduce((sum, s) => sum + s.total, 0);
+    const totalCreditPayments = activeSales.filter(s => s.isCreditPayment && s.paymentMethod !== 'Crédito').reduce((sum, s) => sum + s.total, 0);
     const totalCredits = activeSales.filter(s => s.paymentMethod === 'Crédito').reduce((sum, s) => sum + s.total, 0);
     const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
     
@@ -1203,6 +1228,7 @@ export const POSView: React.FC = () => {
     return {
       totalSales,
       totalCredits,
+      totalCreditPayments,
       totalExpenses,
       balance: totalSales - totalExpenses,
       categoryData: Object.entries(salesByCategory).map(([name, value]) => ({ name, value })),
@@ -1367,13 +1393,14 @@ export const POSView: React.FC = () => {
   };
 
   const handlePayment = async () => {
-    if (!activeTableId || !activeTable) return;
+    if (!activeTableId || !activeTable || isProcessing) return;
     const isPartial = Object.keys(selectedItemsForPayment).length > 0;
     const itemsToPay = isPartial 
       ? activeTable.items.filter(i => selectedItemsForPayment[i.productId]).map(i => ({ ...i, quantity: selectedItemsForPayment[i.productId] }))
       : activeTable.items;
     const total = itemsToPay.reduce((sum, i) => sum + (i.price * i.quantity), 0);
 
+    setIsProcessing(true);
     try {
       let finalPaymentMethod = paymentMethod as string;
       if (paymentMethod === 'Mixto') {
@@ -1438,11 +1465,13 @@ export const POSView: React.FC = () => {
       Swal.fire({ icon: 'success', title: 'Venta Registrada', timer: 1500, showConfirmButton: false });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'sales');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const sendToCredit = async () => {
-    if (!activeTableId || !activeTable) return;
+    if (!activeTableId || !activeTable || isProcessing) return;
     if (activeTable.items.length === 0) {
       Swal.fire({ icon: 'error', title: 'Mesa Vacía', text: 'No hay productos para enviar a crédito.' });
       return;
@@ -1475,6 +1504,7 @@ export const POSView: React.FC = () => {
     });
 
     if (result.isConfirmed) {
+      setIsProcessing(true);
       try {
         // 1. Registrar la venta como crédito
         const saleRef = await addDoc(collection(db, 'sales'), {
@@ -1526,6 +1556,8 @@ export const POSView: React.FC = () => {
         Swal.fire({ icon: 'success', title: 'Enviado a Crédito', timer: 1500, showConfirmButton: false });
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'sales');
+      } finally {
+        setIsProcessing(false);
       }
     }
   };
@@ -1550,7 +1582,7 @@ export const POSView: React.FC = () => {
   };
 
   const clearTable = async () => {
-    if (!activeTableId || !activeTable) return;
+    if (!activeTableId || !activeTable || isProcessing) return;
     const result = await Swal.fire({
       title: activeTable.isCredit ? '¿Eliminar Crédito?' : '¿Borrar pedido?',
       text: activeTable.isCredit 
@@ -1565,6 +1597,7 @@ export const POSView: React.FC = () => {
     });
 
     if (result.isConfirmed) {
+      setIsProcessing(true);
       try {
         if (activeTable.isCredit) {
           // 1. Devolver inventario
@@ -1602,6 +1635,8 @@ export const POSView: React.FC = () => {
       } catch (error) {
         console.error('Error clearing table:', error);
         Swal.fire('Error', 'No se pudo borrar el pedido.', 'error');
+      } finally {
+        setIsProcessing(false);
       }
     }
   };
@@ -1843,14 +1878,14 @@ export const POSView: React.FC = () => {
               {activeTable && (
                 <>
                   {!activeTable.isCredit && (
-                    <button onClick={sendToCredit} className="p-2 text-amber-600 hover:bg-amber-50 rounded-xl transition" title="Enviar a Crédito"><CreditCard className="w-5 h-5" /></button>
+                    <button disabled={isProcessing} onClick={sendToCredit} className="p-2 text-amber-600 hover:bg-amber-50 rounded-xl transition disabled:opacity-50" title="Enviar a Crédito"><CreditCard className="w-5 h-5" /></button>
                   )}
                   <button onClick={() => printComanda('kitchen')} className="p-2 text-orange-600 hover:bg-orange-50 rounded-xl transition" title="Comanda Cocina"><UtensilsCrossed className="w-5 h-5" /></button>
                   <button onClick={async () => {
                     const { value: target } = await Swal.fire({ title: 'Mover Mesa', input: 'number', inputLabel: 'Número de mesa destino', showCancelButton: true });
                     if (target) moveTable(Number(target));
                   }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition" title="Mover Mesa"><RefreshCw className="w-5 h-5" /></button>
-                  <button onClick={clearTable} className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition" title="Borrar Pedido"><Trash2 className="w-5 h-5" /></button>
+                  <button disabled={isProcessing} onClick={clearTable} className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition disabled:opacity-50" title="Borrar Pedido"><Trash2 className="w-5 h-5" /></button>
                 </>
               )}
             </div>
@@ -1900,8 +1935,12 @@ export const POSView: React.FC = () => {
               <Printer className="w-6 h-6" />
             </button>
             <button 
-              disabled={!activeTable || activeTable.items.length === 0} 
-              onClick={() => { setReceivedAmount(currentTotalToPay); setShowPaymentModal(true); }} 
+              disabled={!activeTable || activeTable.items.length === 0 || isProcessing} 
+              onClick={() => { 
+                setReceivedAmount(currentTotalToPay); 
+                setPaymentMethod('Efectivo');
+                setShowPaymentModal(true); 
+              }} 
               className={cn(
                 "flex-[3] py-5 rounded-3xl font-black text-xl shadow-xl transition-all flex items-center justify-center gap-3", 
                 Object.keys(selectedItemsForPayment).length > 0 ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-100 disabled:text-gray-300 disabled:shadow-none"
@@ -2066,9 +2105,9 @@ export const POSView: React.FC = () => {
                   onClick={handlePayment} 
                   data-confirm-payment="true" 
                   disabled={
-                    paymentMethod === 'Mixto' 
+                    isProcessing || (paymentMethod === 'Mixto' 
                       ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) < currentTotalToPay
-                      : receivedAmount < currentTotalToPay
+                      : receivedAmount < currentTotalToPay)
                   } 
                   className="flex-shrink-0 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all"
                 >
@@ -2283,9 +2322,12 @@ export const POSView: React.FC = () => {
               <div className="px-8 py-6 bg-gray-50 border-t">
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 text-sm font-bold gap-4">
                   <div className="flex flex-wrap gap-4 lg:gap-8">
-                    <p className="text-gray-500">Ventas (Caja): <span className="text-green-600">${reportStats.totalSales.toLocaleString()}</span></p>
-                    <p className="text-gray-500">Créditos (Pendientes): <span className="text-amber-600">${reportStats.totalCredits.toLocaleString()}</span></p>
-                    <p className="text-gray-500">Gastos: <span className="text-red-600">-${reportStats.totalExpenses.toLocaleString()}</span></p>
+                    <p className="text-gray-500">Ventas (Caja): <span className="text-green-600 font-black">${reportStats.totalSales.toLocaleString()}</span></p>
+                    {reportStats.totalCreditPayments > 0 && (
+                      <p className="text-blue-500">Recaudo Créditos: <span className="font-black">${reportStats.totalCreditPayments.toLocaleString()}</span></p>
+                    )}
+                    <p className="text-gray-500">Créditos (Pendientes): <span className="text-amber-600 font-black">${reportStats.totalCredits.toLocaleString()}</span></p>
+                    <p className="text-gray-500">Gastos: <span className="text-red-600 font-black">-${reportStats.totalExpenses.toLocaleString()}</span></p>
                   </div>
                 </div>
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2">
@@ -2359,11 +2401,30 @@ export const POSView: React.FC = () => {
                 <h3 className="text-2xl font-black text-gray-800">Registrar Gasto</h3>
                 <button onClick={() => setShowExpensesModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
               </div>
-              <form onSubmit={async (e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); await addDoc(collection(db, 'expenses'), { concept: fd.get('concept'), category: fd.get('category'), amount: Number(fd.get('amount')), timestamp: serverTimestamp() }); setShowExpensesModal(false); Swal.fire({ icon: 'success', title: 'Gasto Registrado', timer: 1500, showConfirmButton: false }); }} className="p-8 space-y-6">
+              <form onSubmit={async (e) => { 
+                e.preventDefault(); 
+                if (isProcessing) return;
+                const fd = new FormData(e.currentTarget); 
+                setIsProcessing(true);
+                try {
+                  await addDoc(collection(db, 'expenses'), { 
+                    concept: fd.get('concept'), 
+                    category: fd.get('category'), 
+                    amount: Number(fd.get('amount')), 
+                    timestamp: serverTimestamp() 
+                  }); 
+                  setShowExpensesModal(false); 
+                  Swal.fire({ icon: 'success', title: 'Gasto Registrado', timer: 1500, showConfirmButton: false }); 
+                } catch (error) {
+                  handleFirestoreError(error, OperationType.WRITE, 'expenses');
+                } finally {
+                  setIsProcessing(false);
+                }
+              }} className="p-8 space-y-6">
                 <div><label className="block text-xs font-black text-gray-400 uppercase mb-2">Concepto</label><input name="concept" required className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold" /></div>
                 <div><label className="block text-xs font-black text-gray-400 uppercase mb-2">Categoría</label><select name="category" className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold"><option>Insumos</option><option>Servicios</option><option>Nómina</option><option>Varios</option></select></div>
                 <div><label className="block text-xs font-black text-gray-400 uppercase mb-2">Monto</label><input name="amount" type="number" required className="w-full p-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 outline-none font-bold text-2xl" /></div>
-                <button type="submit" className="w-full py-5 bg-red-600 text-white font-black text-xl rounded-3xl shadow-xl hover:bg-red-700 transition">REGISTRAR</button>
+                <button type="submit" disabled={isProcessing} className="w-full py-5 bg-red-600 text-white font-black text-xl rounded-3xl shadow-xl hover:bg-red-700 transition disabled:opacity-50">REGISTRAR</button>
               </form>
             </motion.div>
           </div>
@@ -2460,9 +2521,10 @@ export const POSView: React.FC = () => {
                 </button>
                 <button 
                   onClick={saveBusinessSettings}
-                  className="flex-1 py-4 bg-purple-600 text-white font-black rounded-2xl shadow-xl hover:bg-purple-700 transition"
+                  disabled={isProcessing}
+                  className="flex-1 py-4 bg-purple-600 text-white font-black rounded-2xl shadow-xl hover:bg-purple-700 transition disabled:opacity-50"
                 >
-                  GUARDAR CAMBIOS
+                  {isProcessing ? 'GUARDANDO...' : 'GUARDAR CAMBIOS'}
                 </button>
               </div>
             </motion.div>

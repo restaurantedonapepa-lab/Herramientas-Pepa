@@ -96,6 +96,11 @@ service cloud.firestore {
       allow read, write: if isStaff();
     }
 
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /users/{userId} {
       allow read: if isUser(userId) || isStaff();
       allow create: if isUser(userId);
