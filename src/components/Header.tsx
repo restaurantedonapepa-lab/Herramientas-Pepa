@@ -310,32 +310,26 @@ export const Header: React.FC = () => {
                   </div>
                 ) : (
                   cart.map(item => (
-                    <div key={item.productId} className="flex gap-4 p-4 bg-gray-50 rounded-3xl">
-                      <div className="flex-1">
-                        <h3 className="font-black text-gray-900">{item.name}</h3>
+                    <div key={item.productId} className="flex items-center justify-between p-4 bg-gray-50 rounded-3xl gap-4">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-black text-gray-900 truncate">{item.name}</h3>
                         <p className="text-sm font-bold text-red-600">${item.price.toLocaleString()}</p>
-                        <div className="flex items-center gap-3 mt-3">
-                          <button 
-                            onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                            className="w-8 h-8 bg-white rounded-xl flex items-center justify-center text-gray-400 hover:text-red-600 transition shadow-sm"
-                          >
-                            -
-                          </button>
-                          <span className="font-black text-gray-900">{item.quantity}</span>
-                          <button 
-                            onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                            className="w-8 h-8 bg-white rounded-xl flex items-center justify-center text-gray-400 hover:text-red-600 transition shadow-sm"
-                          >
-                            +
-                          </button>
-                        </div>
                       </div>
-                      <button 
-                        onClick={() => removeFromCart(item.productId)}
-                        className="p-2 text-gray-300 hover:text-red-600 transition"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button 
+                          onClick={() => item.quantity === 1 ? removeFromCart(item.productId) : updateQuantity(item.productId, item.quantity - 1)}
+                          className="w-8 h-8 bg-white rounded-xl flex items-center justify-center text-gray-400 hover:text-red-600 transition shadow-sm"
+                        >
+                          {item.quantity === 1 ? <X className="w-4 h-4" /> : '-'}
+                        </button>
+                        <span className="font-black text-gray-900 min-w-[1rem] text-center">{item.quantity}</span>
+                        <button 
+                          onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                          className="w-8 h-8 bg-white rounded-xl flex items-center justify-center text-gray-400 hover:text-red-600 transition shadow-sm"
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}

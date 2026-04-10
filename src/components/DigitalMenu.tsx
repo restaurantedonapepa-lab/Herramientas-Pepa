@@ -668,32 +668,26 @@ export const DigitalMenu: React.FC = () => {
                   </div>
                 ) : (
                   cart.map(item => (
-                    <div key={item.productId} className="flex gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
-                      <div className="flex-1">
-                        <h3 className="font-bold text-[11px] text-white uppercase tracking-tight">{item.name}</h3>
+                    <div key={item.productId} className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl gap-4">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-[11px] text-white uppercase tracking-tight truncate">{item.name}</h3>
                         <p className="text-[10px] font-black text-white mt-1">${item.price.toLocaleString()}</p>
-                        <div className="flex items-center gap-3 mt-3">
-                          <button 
-                            onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                            className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 transition"
-                          >
-                            -
-                          </button>
-                          <span className="font-black text-xs text-white">{item.quantity}</span>
-                          <button 
-                            onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                            className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 transition"
-                          >
-                            +
-                          </button>
-                        </div>
                       </div>
-                      <button 
-                        onClick={() => removeFromCart(item.productId)}
-                        className="p-2 text-gray-700 hover:text-red-500 transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button 
+                          onClick={() => item.quantity === 1 ? removeFromCart(item.productId) : updateQuantity(item.productId, item.quantity - 1)}
+                          className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 transition"
+                        >
+                          {item.quantity === 1 ? <Trash2 className="w-3.5 h-3.5" /> : '-'}
+                        </button>
+                        <span className="font-black text-xs text-white min-w-[1rem] text-center">{item.quantity}</span>
+                        <button 
+                          onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                          className="w-7 h-7 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 transition"
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
