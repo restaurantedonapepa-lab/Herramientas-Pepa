@@ -220,36 +220,17 @@ export const DigitalMenu: React.FC = () => {
             ${getProductWebPrice(product).toLocaleString()}
           </span>
           
-          <div className="flex items-center gap-1">
-            <button 
-              onClick={(e) => {
-                toggleFavorite(product);
-                if (!isFavorite(product.id)) {
-                  triggerFlyAnimation(e, '', 'favorites');
-                  addNotification(`${product.name} añadido a favoritos`, 'favorite');
-                }
-              }}
-              className={cn(
-                "p-1.5 rounded-md transition-all",
-                isFavorite(product.id) 
-                  ? "text-red-600" 
-                  : "text-gray-700 hover:text-red-600"
-              )}
-            >
-              <Heart className={cn("w-3 h-3", isFavorite(product.id) && "fill-current")} />
-            </button>
-            <button 
-              onClick={(e) => {
-                const finalPrice = getProductWebPrice(product);
-                addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
-                triggerFlyAnimation(e, '', 'cart');
-                addNotification(`${product.name} añadido al pedido`, 'cart');
-              }}
-              className="p-1.5 text-red-600 hover:text-red-500 active:scale-90 transition-all"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <button 
+            onClick={(e) => {
+              const finalPrice = getProductWebPrice(product);
+              addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
+              triggerFlyAnimation(e, '', 'cart');
+              addNotification(`${product.name} añadido al pedido`, 'cart');
+            }}
+            className="px-4 py-1.5 bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-600/20"
+          >
+            Pedir
+          </button>
         </div>
       </div>
     </motion.div>

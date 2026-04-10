@@ -190,24 +190,6 @@ export const CatalogView: React.FC = () => {
                       referrerPolicy="no-referrer"
                     />
                   </Link>
-                  <div className="absolute top-4 right-4">
-                    <button 
-                      onClick={(e) => {
-                        toggleFavorite(product);
-                        if (!isFavorite(product.id)) {
-                          triggerFlyAnimation(e, getDriveImageUrl(product.imageId), 'favorites');
-                        }
-                      }}
-                      className={cn(
-                        "p-3 rounded-full shadow-xl transition backdrop-blur-sm",
-                        isFavorite(product.id) 
-                          ? "bg-red-600 text-white" 
-                          : "bg-white/90 text-gray-400 hover:text-red-600"
-                      )}
-                    >
-                      <Heart className={cn("w-4 h-4", isFavorite(product.id) && "fill-current")} />
-                    </button>
-                  </div>
                   <Link 
                     to={`/${product.slug || product.name.toLowerCase().replace(/ /g, '-').normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`}
                     className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-6"
@@ -241,9 +223,9 @@ export const CatalogView: React.FC = () => {
                         addToCart({ productId: product.id, name: product.name, price: finalPrice, quantity: 1 });
                         triggerFlyAnimation(e, getDriveImageUrl(product.imageId), 'cart');
                       }}
-                      className="w-12 h-12 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black hover:scale-110 transition-all shadow-lg"
+                      className="px-6 py-3 bg-red-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-700 hover:scale-105 transition-all shadow-xl shadow-red-200"
                     >
-                      <Plus className="w-6 h-6" />
+                      Pedir
                     </button>
                   </div>
                 </div>
