@@ -27,7 +27,13 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const getAiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('MISSING_API_KEY');
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 interface Message {
   role: 'user' | 'model';
@@ -114,6 +120,7 @@ export const AdminAgentView: React.FC = () => {
       - Siempre ten en cuenta que el usuario es el Administrador Principal del restaurante.
       - Idioma: Español.`;
 
+      const ai = getAiClient();
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [...history, { role: 'user', parts: [{ text: input }] }],
@@ -132,9 +139,15 @@ export const AdminAgentView: React.FC = () => {
       setMessages(prev => [...prev, aiMessage]);
     } catch (error: any) {
       console.error("AI Error:", error);
+      let errorMessage = "⚠️ Error al conectar con el cerebro de IA. Por favor, verifica tu conexión.";
+      
+      if (error.message === 'MISSING_API_KEY') {
+        errorMessage = "⚠️ Falta la API Key de Gemini. Por favor, configúrala en el menú de Ajustes (Secretos).";
+      }
+
       setMessages(prev => [...prev, {
         role: 'model',
-        parts: [{ text: "⚠️ Error al conectar con el cerebro de IA. Por favor, verifica tu conexión o API Key." }],
+        parts: [{ text: errorMessage }],
         timestamp: Date.now()
       }]);
     } finally {

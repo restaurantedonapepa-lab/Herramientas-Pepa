@@ -10,7 +10,11 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const getAiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({ apiKey });
+};
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -344,6 +348,11 @@ export const InventoryView: React.FC = () => {
 
     setIsGeneratingDescription(true);
     try {
+      const ai = getAiClient();
+      if (!ai) {
+        Swal.fire('Configuración Requerida', 'La API Key de Gemini no está configurada. Por favor, realiza la configuración en los ajustes del proyecto.', 'info');
+        return;
+      }
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Eres un experto redactor gastronómico para el restaurante 'Doña Pepa'. Crea una descripción corta (máximo 150 caracteres), provocativa y deliciosa para un plato llamado '${name}' de la categoría '${category || 'General'}'. Resalta el sabor tradicional y casero. No uses comillas.`,

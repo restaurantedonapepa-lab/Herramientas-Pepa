@@ -7,7 +7,11 @@ import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const getAiClient = () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({ apiKey });
+};
 
 export const BulkEditView: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -50,6 +54,11 @@ export const BulkEditView: React.FC = () => {
 
     setGeneratingId(product.id);
     try {
+      const ai = getAiClient();
+      if (!ai) {
+        Swal.fire('Configuración Requerida', 'La API Key de Gemini no está configurada.', 'info');
+        return;
+      }
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Eres un experto redactor gastronómico para el restaurante 'Doña Pepa'. Crea una descripción corta (máximo 150 caracteres), provocativa y deliciosa para un plato llamado '${currentData.name}' de la categoría '${currentData.category || 'General'}'. Resalta el sabor tradicional y casero. No uses comillas.`,
