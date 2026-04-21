@@ -233,25 +233,15 @@ function AppContent() {
   const isCarta = location.pathname === '/carta';
 
   return (
-    <div className={cn("flex h-screen overflow-hidden relative", isCarta ? "bg-[#0a0a0a]" : "bg-gray-100")}>
+    <div className={cn("flex h-screen overflow-hidden relative selection:bg-red-100 w-full max-w-full", isCarta ? "bg-[#0a0a0a]" : "bg-gray-100")}>
       <GoogleOneTap />
       <CheckoutModal />
       {!isKiosk && !isCarta && <Navigation user={user} userProfile={userProfile} isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />}
       
-      {/* Floating Mobile Hamburger Menu */}
-      {!isKiosk && isAdminView && !isCarta && (
-        <button 
-          onClick={() => setIsSidebarOpen(true)}
-          className="lg:hidden fixed bottom-6 left-6 z-[55] p-4 bg-red-600 text-white rounded-full shadow-2xl hover:bg-red-700 transition"
-        >
-          <Menu className="w-6 h-6" />
-        </button>
-      )}
-
-      <main className={cn("flex-1 flex flex-col", (location.pathname === '/pos' || isCarta) ? "overflow-hidden" : "overflow-y-auto")}>
-        {!isKiosk && !isCarta && <Header />}
+      <main className={cn("flex-1 flex flex-col min-w-0 transition-all overflow-x-hidden", (location.pathname === '/pos' || isCarta) ? "overflow-hidden" : "overflow-y-auto")}>
+        {!isKiosk && !isCarta && <Header onMenuClick={() => setIsSidebarOpen(true)} />}
         <ErrorBoundary>
-          <div className={cn("flex-1 flex flex-col min-h-0", isCarta && "overflow-y-auto")}>
+          <div className={cn("flex-1 flex flex-col min-w-0", isCarta && "overflow-y-auto")}>
             <Routes>
               <Route path="/" element={<CatalogView />} />
               <Route path="/carta" element={<DigitalMenu />} />

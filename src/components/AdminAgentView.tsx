@@ -176,16 +176,16 @@ export const AdminAgentView: React.FC = () => {
     )}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b bg-white">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-200">
-            <Bot className="w-6 h-6 text-white" />
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 bg-red-600 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg shadow-red-200 shrink-0">
+            <Bot className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
           </div>
-          <div>
-            <h2 className="font-black text-gray-900 flex items-center gap-2 leading-none uppercase tracking-tight">
-              Pepa Intelligence <Sparkles className="w-3 h-3 text-red-600" />
+          <div className="min-w-0">
+            <h2 className="font-black text-gray-900 flex items-center gap-1.5 leading-none uppercase tracking-tight text-sm sm:text-base truncate">
+              Pepa Intelligence <Sparkles className="w-3 h-3 text-red-600 shrink-0" />
             </h2>
-            <span className="text-[10px] font-bold text-green-500 uppercase flex items-center gap-1 mt-1">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> Conectado al Proyecto
+            <span className="text-[9px] sm:text-[10px] font-bold text-green-500 uppercase flex items-center gap-1 mt-1 truncate">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shrink-0" /> Conectado
             </span>
           </div>
         </div>
@@ -287,30 +287,35 @@ export const AdminAgentView: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 key={idx}
                 className={cn(
-                  "flex gap-3 max-w-[85%]",
-                  message.role === 'user' ? "ml-auto flex-row-reverse" : ""
+                  "flex w-full mb-4",
+                  message.role === 'user' ? "justify-end" : "justify-start"
                 )}
               >
                 <div className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-sm",
-                  message.role === 'user' ? "bg-gray-900" : "bg-red-600"
+                  "flex gap-2 sm:gap-3 w-full max-w-[90vw] sm:max-w-[85%]",
+                  message.role === 'user' ? "flex-row-reverse" : "flex-row"
                 )}>
-                  {message.role === 'user' ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
-                </div>
-                <div className={cn(
-                  "p-4 rounded-2xl text-sm shadow-sm",
-                  message.role === 'user' 
-                    ? "bg-gray-900 text-white rounded-tr-none" 
-                    : "bg-white border border-gray-100 text-gray-800 rounded-tl-none"
-                )}>
-                  <div className="prose prose-sm prose-slate max-w-none prose-headings:font-black prose-headings:text-gray-900 prose-strong:text-red-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded">
-                    <ReactMarkdown>{message.parts[0].text}</ReactMarkdown>
+                  <div className={cn(
+                    "hidden sm:flex w-8 h-8 rounded-lg items-center justify-center shrink-0 shadow-sm mt-1",
+                    message.role === 'user' ? "bg-gray-900" : "bg-red-600"
+                  )}>
+                    {message.role === 'user' ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
                   </div>
                   <div className={cn(
-                    "text-[8px] font-black uppercase tracking-widest mt-2",
-                    message.role === 'user' ? "text-gray-500" : "text-gray-400"
+                    "p-3 sm:p-4 rounded-2xl text-[13px] sm:text-sm shadow-sm min-w-0 flex-1 overflow-hidden transition-all",
+                    message.role === 'user' 
+                      ? "bg-gray-900 text-white rounded-tr-none ml-auto" 
+                      : "bg-white border border-gray-100 text-gray-800 rounded-tl-none mr-auto text-left"
                   )}>
-                    {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <div className="prose prose-sm prose-slate max-w-none prose-headings:font-black prose-headings:text-gray-900 prose-strong:text-red-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded break-words whitespace-normal">
+                      <ReactMarkdown>{message.parts[0].text}</ReactMarkdown>
+                    </div>
+                    <div className={cn(
+                      "text-[8px] font-black uppercase tracking-widest mt-2 opacity-50",
+                      message.role === 'user' ? "text-right" : ""
+                    )}>
+                      {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -320,42 +325,42 @@ export const AdminAgentView: React.FC = () => {
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex gap-3"
+                className="flex gap-2 sm:gap-3"
               >
-                <div className="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center shadow-lg">
+                <div className="hidden sm:flex w-8 h-8 rounded-lg bg-red-600 items-center justify-center shadow-lg mt-1">
                   <Bot className="w-4 h-4 text-white animate-pulse" />
                 </div>
-                <div className="p-4 bg-white border border-gray-100 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
+                <div className="p-3 sm:p-4 bg-white border border-gray-100 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
                   <div className="flex gap-1">
                     <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.3s]" />
                     <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.15s]" />
                     <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" />
                   </div>
-                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Analizando proyecto...</span>
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Analizando...</span>
                 </div>
               </motion.div>
             )}
           </div>
 
           {/* Input Area */}
-          <div className="p-4 border-t bg-white">
-            <form onSubmit={handleSubmit} className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100 focus-within:border-red-600 transition-all">
+          <div className="p-4 border-t bg-white min-w-0">
+            <form onSubmit={handleSubmit} className="flex items-center gap-2 sm:gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100 focus-within:border-red-600 transition-all min-w-0">
               <input 
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Pregunta algo sobre diseño, código o SEO..."
-                className="flex-1 bg-transparent border-none outline-none text-sm font-bold px-3 py-2 text-gray-800 placeholder:text-gray-400"
+                placeholder="Pregunta algo..."
+                className="flex-1 bg-transparent border-none outline-none text-[12px] sm:text-sm font-bold px-2 sm:px-3 py-2 text-gray-800 placeholder:text-gray-400 min-w-0"
               />
               <button 
                 type="submit"
                 disabled={!input.trim() || isLoading}
-                className="p-3 bg-red-600 text-white rounded-xl shadow-lg hover:bg-red-700 transition disabled:bg-gray-200 disabled:shadow-none"
+                className="p-2.5 sm:p-3 bg-red-600 text-white rounded-xl shadow-lg hover:bg-red-700 transition disabled:bg-gray-200 disabled:shadow-none shrink-0"
               >
                 <Send className="w-4 h-4" />
               </button>
             </form>
-            <p className="text-[8px] text-center text-gray-400 mt-2 font-bold uppercase tracking-widest">
+            <p className="text-[7px] sm:text-[8px] text-center text-gray-400 mt-2 font-bold uppercase tracking-tight sm:tracking-widest px-2 truncate">
               Potenciado por Gemini 3 Flash • Pepa Intelligence v1.0
             </p>
           </div>
@@ -369,6 +374,7 @@ export const AdminAgentView: React.FC = () => {
           padding: 1rem;
           border-radius: 1rem;
           overflow-x: auto;
+          max-width: 100%;
           font-family: 'JetBrains Mono', monospace;
           font-size: 0.8rem;
           margin: 1rem 0;
@@ -378,6 +384,16 @@ export const AdminAgentView: React.FC = () => {
           background: rgba(220, 38, 38, 0.1);
           color: #dc2626;
           font-weight: bold;
+          word-break: break-all;
+        }
+        .prose p, .prose li, .prose h1, .prose h2, .prose h3 {
+          word-wrap: break-word;
+          overflow-wrap: anywhere;
+          word-break: normal;
+        }
+        .prose {
+          max-width: 100% !important;
+          overflow-x: hidden;
         }
       `}} />
     </div>

@@ -34,7 +34,7 @@ const FlyingImage: React.FC<{ animation: FlyingAnimation }> = ({ animation }) =>
   );
 };
 
-export const Header: React.FC = () => {
+export const Header: React.FC<{ onMenuClick?: () => void }> = ({ onMenuClick }) => {
   const { 
     itemCount, favorites, cart, removeFromCart, updateQuantity, 
     total, toggleFavorite, searchTerm, setSearchTerm, animations,
@@ -46,34 +46,41 @@ export const Header: React.FC = () => {
   const location = useLocation();
   const user = auth.currentUser;
 
-  const isPublic = !['/pos', '/inventory'].includes(location.pathname);
-
-  if (!isPublic) return null;
+  const isPublic = !['/pos', '/inventory', '/admin', '/users'].includes(location.pathname);
 
   return (
     <>
       <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 px-4 py-3 border-b border-gray-100">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition shrink-0">
-            <img 
-              src="https://lh3.googleusercontent.com/d/1wqVtaAyck4GGizYQZjj-gEi0y__9PYeh=w40-h40-c" 
-              alt="Logo Doña Pepa" 
-              className="w-8 h-8 sm:w-10 h-10 rounded-xl shadow-md"
-              referrerPolicy="no-referrer"
-            />
-            <div className="hidden md:block">
-              <h1 className="font-black text-gray-900 text-lg leading-none">Restaurante Doña Pepa</h1>
-              <p className="text-[10px] font-black text-red-600 uppercase tracking-widest mt-1">Tradicion desde 1957</p>
-            </div>
-          </Link>
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2">
+            {onMenuClick && !isPublic && (
+              <button 
+                onClick={onMenuClick}
+                className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-xl transition lg:hidden"
+              >
+                <Menu className="w-6 h-6" />
+              </button>
+            )}
+            <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition shrink-0">
+              <img 
+                src="https://lh3.googleusercontent.com/d/1wqVtaAyck4GGizYQZjj-gEi0y__9PYeh=w40-h40-c" 
+                alt="Logo Doña Pepa" 
+                className="w-8 h-8 sm:w-10 h-10 rounded-xl shadow-md"
+                referrerPolicy="no-referrer"
+              />
+              <div className="hidden md:block">
+                <h1 className="font-black text-gray-900 text-lg leading-none">Doña Pepa</h1>
+              </div>
+            </Link>
+          </div>
 
           {/* Search Bar - Now in Header for all devices */}
-          <div className="flex-1 max-w-xl relative">
+          <div className="flex-1 max-w-xl relative min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input 
               type="text" 
               placeholder="Buscar..."
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-red-500 transition outline-none"
+              className="w-full pl-8 pr-2 sm:pl-10 sm:pr-4 py-2 bg-gray-50 border-none rounded-2xl text-[12px] sm:text-sm font-bold focus:ring-2 focus:ring-red-500 transition outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -148,51 +155,53 @@ export const Header: React.FC = () => {
       </header>
 
       {/* Floating Action Buttons */}
-      <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-4">
-        <button 
-          id="floating-favorites"
-          onClick={() => setShowFavorites(true)}
-          className="p-4 bg-white text-gray-400 hover:text-red-600 rounded-full shadow-2xl transition relative group"
-        >
-          <Heart className="w-6 h-6" />
-          {favorites.length > 0 && (
-            <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-600 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-black">
-              {favorites.length}
+      {isPublic && (
+        <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-4">
+          <button 
+            id="floating-favorites"
+            onClick={() => setShowFavorites(true)}
+            className="p-4 bg-white text-gray-400 hover:text-red-600 rounded-full shadow-2xl transition relative group"
+          >
+            <Heart className="w-6 h-6" />
+            {favorites.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-600 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-black">
+                {favorites.length}
+              </span>
+            )}
+            <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-gray-900 text-white text-[10px] font-black rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
+              FAVORITOS
             </span>
-          )}
-          <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-gray-900 text-white text-[10px] font-black rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
-            FAVORITOS
-          </span>
-        </button>
+          </button>
 
-        <button 
-          id="floating-cart"
-          onClick={() => setShowCart(true)}
-          className="p-4 bg-red-600 text-white rounded-full shadow-2xl shadow-red-200 hover:bg-red-700 transition relative group"
-        >
-          <ShoppingCart className="w-6 h-6" />
-          {itemCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-6 h-6 bg-white text-red-600 text-[10px] flex items-center justify-center rounded-full border-2 border-red-600 font-black">
-              {itemCount}
+          <button 
+            id="floating-cart"
+            onClick={() => setShowCart(true)}
+            className="p-4 bg-red-600 text-white rounded-full shadow-2xl shadow-red-200 hover:bg-red-700 transition relative group"
+          >
+            <ShoppingCart className="w-6 h-6" />
+            {itemCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-6 h-6 bg-white text-red-600 text-[10px] flex items-center justify-center rounded-full border-2 border-red-600 font-black">
+                {itemCount}
+              </span>
+            )}
+            <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-gray-900 text-white text-[10px] font-black rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
+              MI PEDIDO
             </span>
-          )}
-          <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-gray-900 text-white text-[10px] font-black rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
-            MI PEDIDO
-          </span>
-        </button>
+          </button>
 
-        <a 
-          href="https://wa.me/573100000000" // Replace with actual number
-          target="_blank"
-          rel="noopener noreferrer"
-          className="p-4 bg-green-500 text-white rounded-full shadow-2xl shadow-green-200 hover:bg-green-600 transition group"
-        >
-          <MessageCircle className="w-6 h-6" />
-          <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-gray-900 text-white text-[10px] font-black rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
-            WHATSAPP
-          </span>
-        </a>
-      </div>
+          <a 
+            href="https://wa.me/573100000000" // Replace with actual number
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-4 bg-green-500 text-white rounded-full shadow-2xl shadow-green-200 hover:bg-green-600 transition group"
+          >
+            <MessageCircle className="w-6 h-6" />
+            <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-gray-900 text-white text-[10px] font-black rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none">
+              WHATSAPP
+            </span>
+          </a>
+        </div>
+      )}
 
       {/* Flying Animations */}
       {animations.map(anim => (

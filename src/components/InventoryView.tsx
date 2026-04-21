@@ -390,8 +390,8 @@ export const InventoryView: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex flex-1 w-full max-w-2xl gap-2 items-center">
-          <div className="relative flex-1">
+        <div className="flex flex-1 w-full max-w-2xl gap-2 items-center flex-wrap sm:flex-nowrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input 
               type="text" 
@@ -401,43 +401,25 @@ export const InventoryView: React.FC = () => {
               onChange={(e) => setInventorySearch(e.target.value)}
             />
           </div>
-          {activeTab === 'products' && (
-            <div className="md:hidden">
-              <div className="relative group">
-                <button className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm">
-                  <MoreVertical className="w-5 h-5 text-gray-600" />
-                </button>
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 py-2">
-                  <button 
-                    onClick={() => navigate('/bulk-edit')}
-                    className="w-full px-4 py-3 text-left hover:bg-red-50 text-red-600 font-bold flex items-center gap-3 transition"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" /> Edición Masiva
-                  </button>
-                  <button 
-                    onClick={handleCleanDuplicates}
-                    className="w-full px-4 py-3 text-left hover:bg-orange-50 text-orange-600 font-bold flex items-center gap-3 transition"
-                  >
-                    <Sparkles className="w-4 h-4" /> Limpiar Duplicados
-                  </button>
-                  <button 
-                    onClick={handleImportFromSheets}
-                    disabled={isImporting}
-                    className="w-full px-4 py-3 text-left hover:bg-blue-50 text-blue-600 font-bold flex items-center gap-3 transition disabled:opacity-50"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" /> {isImporting ? 'Importando...' : 'Importar desde Sheets'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+          
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button 
+              onClick={() => { 
+                setEditingItem(null); 
+                setIsProductActive(true);
+                setIsModalOpen(true); 
+              }}
+              className={cn(
+                "flex-1 sm:flex-none px-4 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition shadow-sm text-white text-sm whitespace-nowrap",
+                activeTab === 'ingredients' ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
+              )}
+            >
+              <Plus className="w-5 h-5" /> <span className="sm:hidden">Nuevo</span><span className="hidden sm:inline">Nuevo {activeTab === 'ingredients' ? 'Insumo' : 'Plato'}</span>
+            </button>
 
-        <div className="hidden md:flex gap-2">
-          {activeTab === 'products' && (
-            <div className="relative group">
-              <button className="p-3 bg-white border border-gray-200 rounded-2xl hover:bg-gray-50 transition shadow-sm">
-                <MoreVertical className="w-6 h-6 text-gray-600" />
+            <div className="relative group shrink-0">
+              <button className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm">
+                <MoreVertical className="w-5 h-5 text-gray-600" />
               </button>
               <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 py-2">
                 <button 
@@ -461,20 +443,7 @@ export const InventoryView: React.FC = () => {
                 </button>
               </div>
             </div>
-          )}
-          <button 
-            onClick={() => { 
-              setEditingItem(null); 
-              setIsProductActive(true);
-              setIsModalOpen(true); 
-            }}
-            className={cn(
-              "px-6 py-2 rounded-xl font-bold flex items-center gap-2 transition shadow-md text-white",
-              activeTab === 'ingredients' ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
-            )}
-          >
-            <Plus className="w-5 h-5" /> Nuevo {activeTab === 'ingredients' ? 'Insumo' : 'Plato'}
-          </button>
+          </div>
         </div>
       </div>
 
@@ -566,23 +535,6 @@ export const InventoryView: React.FC = () => {
           ))}
         </div>
       )}
-
-      {/* Floating Action Button for New Item */}
-      <button
-        onClick={() => {
-          setEditingItem(null);
-          setIsProductActive(true);
-          setUploadedImageId('');
-          setIsModalOpen(true);
-        }}
-        className={cn(
-          "fixed bottom-8 right-8 w-16 h-16 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-40 group",
-          activeTab === 'ingredients' ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
-        )}
-        title={activeTab === 'ingredients' ? "Nuevo Insumo" : "Nuevo Plato"}
-      >
-        <Plus className="w-8 h-8 group-hover:rotate-90 transition-transform duration-300" />
-      </button>
 
       {/* Modal Form */}
       {isModalOpen && (
