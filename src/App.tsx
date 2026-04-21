@@ -10,6 +10,7 @@ import { BulkEditView } from './components/BulkEditView';
 import { UserManagementView } from './components/UserManagementView';
 import { ProductDetailView } from './components/ProductDetailView';
 import { DigitalMenu } from './components/DigitalMenu';
+import { AdminAgentView } from './components/AdminAgentView';
 import { Header } from './components/Header';
 import { CheckoutModal } from './components/CheckoutModal';
 import { GoogleOneTap } from './components/GoogleOneTap';
@@ -26,7 +27,8 @@ import {
   ChevronRight,
   AlertCircle,
   Home,
-  Users
+  Users,
+  Sparkles
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -81,14 +83,15 @@ const Navigation: React.FC<{ user: User | null, userProfile: any, isOpen: boolea
   const location = useLocation();
   const navigate = useNavigate();
 
-  const isPublic = location.pathname === '/' || location.pathname.startsWith('/catalog') || (!['/pos', '/inventory', '/users'].includes(location.pathname) && location.pathname !== '/');
-
-  const navItems = [
-    { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600', path: '/pos', roles: ['admin', 'cajero', 'mesero'] },
-    { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600', path: '/inventory', roles: ['admin', 'cocina'] },
-    { id: 'users', label: 'Usuarios', icon: Users, color: 'text-purple-600', path: '/users', roles: ['admin'] },
-    { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600', path: '/', roles: ['admin', 'mesero', 'cajero', 'cocina', 'cliente'] },
-  ];
+      const isPublic = location.pathname === '/' || location.pathname.startsWith('/catalog') || (!['/pos', '/inventory', '/users', '/admin'].includes(location.pathname) && location.pathname !== '/');
+    
+      const navItems = [
+        { id: 'pos', label: 'TPV / Ventas', icon: ShoppingCart, color: 'text-blue-600', path: '/pos', roles: ['admin', 'cajero', 'mesero'] },
+        { id: 'inventory', label: 'Inventario', icon: Package, color: 'text-orange-600', path: '/inventory', roles: ['admin', 'cocina'] },
+        { id: 'admin', label: 'IA Inteligencia', icon: Sparkles, color: 'text-red-600', path: '/admin', roles: ['admin'] },
+        { id: 'users', label: 'Usuarios', icon: Users, color: 'text-purple-600', path: '/users', roles: ['admin'] },
+        { id: 'catalog', label: 'Ver Catálogo', icon: Utensils, color: 'text-red-600', path: '/', roles: ['admin', 'mesero', 'cajero', 'cocina', 'cliente'] },
+      ];
 
   if (isPublic) return null;
 
@@ -206,7 +209,7 @@ function AppContent() {
   const queryParams = new URLSearchParams(location.search);
   const isKiosk = queryParams.get('kiosk') === 'true';
 
-  const isAdminView = ['/pos', '/inventory', '/users'].includes(location.pathname);
+  const isAdminView = ['/pos', '/inventory', '/users', '/admin'].includes(location.pathname);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -256,6 +259,7 @@ function AppContent() {
               <Route path="/inventory" element={<InventoryView />} />
               <Route path="/bulk-edit" element={<BulkEditView />} />
               <Route path="/users" element={<UserManagementView />} />
+              <Route path="/admin" element={<AdminAgentView />} />
               <Route path="/:slug" element={<ProductDetailView />} />
             </Routes>
           </div>
