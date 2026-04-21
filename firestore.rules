@@ -128,5 +128,13 @@ service cloud.firestore {
       allow create: if true; // Permitir pedidos de clientes no autenticados
       allow update, delete: if isAdmin();
     }
+
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated() && (isAdmin() || get(/databases/$(database)/documents/chats/$(chatId)).data.userId == request.auth.uid);
+      }
+    }
   }
 }

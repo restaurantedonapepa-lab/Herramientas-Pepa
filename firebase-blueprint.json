@@ -102,6 +102,29 @@
         "lastOrder": { "type": "string", "format": "date-time", "description": "Fecha del último pedido" }
       },
       "required": ["name", "phone", "address"]
+    },
+    "AIConversation": {
+      "title": "Conversación IA",
+      "description": "Historial de chat guardado con la IA",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "createdAt", "updatedAt"]
+    },
+    "AIMessage": {
+      "title": "Mensaje IA",
+      "description": "Mensaje individual dentro de una conversación",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "parts": { "type": "array", "items": { "type": "object" } },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["role", "parts", "timestamp"]
     }
   },
   "firestore": {
@@ -111,6 +134,8 @@
     "/expenses/{expenseId}": { "schema": "Expense", "description": "Registro de gastos" },
     "/tables/{tableId}": { "schema": "Table", "description": "Estado de las mesas" },
     "/settings/business": { "schema": "BusinessSettings", "description": "Configuración global del negocio" },
-    "/customers/{phone}": { "schema": "Customer", "description": "Directorio de clientes para domicilios" }
+    "/customers/{phone}": { "schema": "Customer", "description": "Directorio de clientes para domicilios" },
+    "/chats/{chatId}": { "schema": "AIConversation", "description": "Conversaciones guardadas con Pepa Intelligence" },
+    "/chats/{chatId}/messages/{messageId}": { "schema": "AIMessage", "description": "Mensajes de la conversación" }
   }
 }
