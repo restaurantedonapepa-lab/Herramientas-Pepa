@@ -146,23 +146,48 @@ export const AdminAgentView: React.FC = () => {
   });
 
   const handleGoogleAdsConnect = async () => {
+    // Open a blank window immediately to bypass popup blockers
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    
+    const popup = window.open(
+      'about:blank',
+      'google_ads_popup',
+      `width=${width},height=${height},left=${left},top=${top}`
+    );
+
+    if (!popup) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Ventana bloqueada',
+        text: 'Tu navegador bloqueó la ventana emergente. Por favor, permite las ventanas emergentes para este sitio e inténtalo de nuevo.'
+      });
+      return;
+    }
+
     try {
       const origin = window.location.origin;
       const resp = await fetch(`/api/auth/google-ads/url?origin=${encodeURIComponent(origin)}`);
+      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      
       const { url } = await resp.json();
       
-      const width = 600;
-      const height = 700;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
+      if (!url) {
+        throw new Error("No se recibió la URL de autenticación. Verifica las variables de entorno en el servidor.");
+      }
       
-      window.open(
-        url,
-        'google_ads_popup',
-        `width=${width},height=${height},left=${left},top=${top}`
-      );
-    } catch (err) {
+      // Update the popup with the real URL
+      popup.location.href = url;
+    } catch (err: any) {
       console.error("Error initiating Google Ads auth:", err);
+      popup.close();
+      Swal.fire({
+        icon: 'error',
+        title: 'Error de conexión',
+        text: err.message || 'No se pudo iniciar el proceso de autenticación. Verifica que el servidor esté configurado correctamente.'
+      });
     }
   };
 
