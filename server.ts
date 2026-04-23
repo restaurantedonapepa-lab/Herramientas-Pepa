@@ -148,7 +148,8 @@ async function startServer() {
       if (action === 'list_campaigns') {
         const campaigns = await customer.report({
           entity: "campaign",
-          metrics: ["campaign.id", "campaign.name", "campaign.status", "metrics.clicks", "metrics.cost_micros", "metrics.impressions"],
+          attributes: ["campaign.id", "campaign.name", "campaign.status"],
+          metrics: ["metrics.clicks", "metrics.cost_micros", "metrics.impressions"],
           limit: 10,
         });
         return res.json({ campaigns });
