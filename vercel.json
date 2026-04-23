@@ -7,10 +7,6 @@
     {
       "source": "/auth/(.*)",
       "destination": "/server.ts"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
     }
   ]
 }

@@ -170,6 +170,14 @@ export const AdminAgentView: React.FC = () => {
 
     try {
       const origin = window.location.origin;
+      
+      // 1. First, "ping" the server to see if it's there
+      const pingResp = await fetch('/api/health');
+      if (!pingResp.ok) {
+        throw new Error('El servidor de la API no responde (Error ' + pingResp.status + '). ¿Has hecho el Redeploy en Vercel?');
+      }
+
+      // 2. If it's alive, get the auth URL
       const resp = await fetch(`/api/auth/google-ads/url?origin=${encodeURIComponent(origin)}`);
       const data = await resp.json();
 

@@ -136,9 +136,13 @@ async function startServer() {
         developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
       });
 
+      const managerId = process.env.GOOGLE_ADS_MANAGER_ACCOUNT;
+      const isManager = managerId && managerId !== 'false';
+
       const customer = client.Customer({
         customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID!.replace(/-/g, ''),
         refresh_token: tokens.refresh_token,
+        login_customer_id: isManager ? managerId.replace(/-/g, '') : undefined,
       });
 
       if (action === 'list_campaigns') {

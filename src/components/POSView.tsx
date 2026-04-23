@@ -291,7 +291,7 @@ export const POSView: React.FC = () => {
         {...attributes}
         {...listeners}
         onClick={onClick}
-        className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group touch-none"
+        className="bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left overflow-hidden flex flex-col group"
       >
         <div className="aspect-square relative overflow-hidden bg-gray-50">
           <img src={getDriveImageUrl(product.imageId)} alt={product.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
@@ -328,7 +328,7 @@ export const POSView: React.FC = () => {
         {...attributes}
         {...listeners}
         onClick={onClick}
-        className="aspect-square bg-white rounded-[32px] border-2 border-gray-100 shadow-sm hover:shadow-xl hover:border-red-200 transition-all flex flex-col items-center justify-center p-4 text-center group touch-none"
+        className="aspect-square bg-white rounded-[32px] border-2 border-gray-100 shadow-sm hover:shadow-xl hover:border-red-200 transition-all flex flex-col items-center justify-center p-4 text-center group"
       >
         <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
           <UtensilsCrossed className="w-8 h-8 text-red-600" />
@@ -1807,7 +1807,7 @@ export const POSView: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto p-6 min-h-0">
                 {activeCategory === 'all' && !searchTerm ? (
                   <DndContext
                     sensors={sensors}

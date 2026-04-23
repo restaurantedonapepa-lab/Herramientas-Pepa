@@ -238,10 +238,10 @@ function AppContent() {
       <CheckoutModal />
       {!isKiosk && !isCarta && <Navigation user={user} userProfile={userProfile} isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />}
       
-      <main className={cn("flex-1 flex flex-col min-w-0 transition-all overflow-x-hidden", (location.pathname === '/pos' || isCarta) ? "overflow-hidden" : "overflow-y-auto")}>
+      <main className={cn("flex-1 flex flex-col min-w-0 transition-all min-h-0", (location.pathname === '/pos' || isCarta) ? "overflow-hidden" : "overflow-y-auto overflow-x-hidden")}>
         {!isKiosk && !isCarta && <Header onMenuClick={() => setIsSidebarOpen(true)} />}
         <ErrorBoundary>
-          <div className={cn("flex-1 flex flex-col min-w-0", isCarta && "overflow-y-auto")}>
+          <div className={cn("flex-1 flex flex-col min-w-0 min-h-0", (isCarta || location.pathname === '/pos') && "overflow-hidden")}>
             <Routes>
               <Route path="/" element={<CatalogView />} />
               <Route path="/carta" element={<DigitalMenu />} />
