@@ -20,9 +20,10 @@ import {
   Plus,
   MessageSquare,
   History,
-  Layout
+  Layout,
+  Database
 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import { useCart } from '../context/CartContext';
 import { db, auth } from '../firebase';
@@ -30,14 +31,15 @@ import {
   collection, 
   getDocs, 
   query, 
-  limit, 
+  limit as firestoreLimit, 
   orderBy, 
   addDoc, 
   serverTimestamp, 
   onSnapshot, 
   doc, 
   updateDoc,
-  where
+  where,
+  Timestamp
 } from 'firebase/firestore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -53,6 +55,54 @@ const getAiClient = () => {
   }
   return new GoogleGenAI({ apiKey });
 };
+
+// Tool Declarations
+const getSalesHistoryTool: FunctionDeclaration = {
+  name: "getSalesHistory",
+  description: "Obtiene el historial de ventas del restaurante. Úsalo para analizar ingresos, qué platos se venden más y tendencias temporales.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      limitCount: { type: Type.NUMBER, description: "Cantidad de ventas a consultar (máximo 300). Predeterminado: 50." },
+      startDate: { type: Type.STRING, description: "Fecha inicial en formato ISO (ej: 2024-03-20T00:00:00Z). Opcional." },
+      endDate: { type: Type.STRING, description: "Fecha final en formato ISO (ej: 2024-03-20T23:59:59Z). Opcional." }
+    }
+  }
+};
+
+const getInventoryStatusTool: FunctionDeclaration = {
+  name: "getInventoryStatus",
+  description: "Consulta el stock actual de insumos e ingredientes. Úsalo para saber qué falta o qué está por agotarse.",
+  parameters: { type: Type.OBJECT, properties: {} }
+};
+
+const getProductsCatalogTool: FunctionDeclaration = {
+  name: "getProductsCatalog",
+  description: "Obtiene la lista de productos del menú, sus precios y categorías.",
+  parameters: { type: Type.OBJECT, properties: {} }
+};
+
+const manageGoogleAdsTool: FunctionDeclaration = {
+  name: "manageGoogleAds",
+  description: "Crea o gestiona campañas de Google Ads. Permite promocionar platos, el restaurante o analizar el rendimiento de anuncios existentes.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      action: { type: Type.STRING, enum: ["create_campaign", "list_campaigns"], description: "Acción a realizar." },
+      campaignData: {
+        type: Type.OBJECT,
+        description: "Datos de la campaña (nombre, presupuesto, palabras clave).",
+        properties: {
+          name: { type: Type.STRING },
+          budget: { type: Type.NUMBER },
+          keywords: { type: Type.ARRAY, items: { type: Type.STRING } }
+        }
+      }
+    }
+  }
+};
+
+const tools = [{ functionDeclarations: [getSalesHistoryTool, getInventoryStatusTool, getProductsCatalogTool, manageGoogleAdsTool] }];
 
 interface Message {
   role: 'user' | 'model';
@@ -90,6 +140,91 @@ export const AdminAgentView: React.FC = () => {
 
   // Agent context state
   const [projectStats, setProjectStats] = useState<any>(null);
+  const [googleAdsTokens, setGoogleAdsTokens] = useState<any>(() => {
+    const saved = localStorage.getItem('google_ads_tokens');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const handleGoogleAdsConnect = async () => {
+    try {
+      const origin = window.location.origin;
+      const resp = await fetch(`/api/auth/google-ads/url?origin=${encodeURIComponent(origin)}`);
+      const { url } = await resp.json();
+      
+      const width = 600;
+      const height = 700;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      window.open(
+        url,
+        'google_ads_popup',
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+    } catch (err) {
+      console.error("Error initiating Google Ads auth:", err);
+    }
+  };
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_ADS_AUTH_SUCCESS') {
+        setGoogleAdsTokens(event.data.tokens);
+        localStorage.setItem('google_ads_tokens', JSON.stringify(event.data.tokens));
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const executeTool = async (call: any) => {
+    try {
+      switch (call.name) {
+        case 'getSalesHistory': {
+          const { limitCount = 50, startDate, endDate } = call.args;
+          let q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
+          
+          const constraints = [];
+          if (startDate) {
+            constraints.push(where('timestamp', '>=', Timestamp.fromDate(new Date(startDate))));
+          }
+          if (endDate) {
+            constraints.push(where('timestamp', '<=', Timestamp.fromDate(new Date(endDate))));
+          }
+          
+          q = query(collection(db, 'sales'), ...constraints, orderBy('timestamp', 'desc'), firestoreLimit(Math.min(limitCount, 300)));
+          
+          const snap = await getDocs(q);
+          return snap.docs.map(d => ({ id: d.id, ...d.data() as object }));
+        }
+        case 'getInventoryStatus': {
+          const snap = await getDocs(collection(db, 'ingredients'));
+          return snap.docs.map(d => ({ id: d.id, ...d.data() as object }));
+        }
+        case 'getProductsCatalog': {
+          const snap = await getDocs(collection(db, 'products'));
+          return snap.docs.map(d => ({ id: d.id, ...d.data() as object }));
+        }
+        case 'manageGoogleAds': {
+          if (!googleAdsTokens) {
+            return { error: "Google Ads no está conectado. El usuario debe hacer clic en 'Conectar Google Ads' primero." };
+          }
+          const { action, campaignData } = call.args;
+          const resp = await fetch('/api/ads/create-campaign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tokens: googleAdsTokens, action, campaignData })
+          });
+          return await resp.json();
+        }
+        default:
+          return { error: `Tool ${call.name} not found` };
+      }
+    } catch (err: any) {
+      console.error(`Error executing tool ${call.name}:`, err);
+      return { error: err.message };
+    }
+  };
 
   // Fetch chat sessions
   useEffect(() => {
@@ -99,7 +234,7 @@ export const AdminAgentView: React.FC = () => {
       collection(db, 'chats'),
       where('userId', '==', auth.currentUser.uid),
       orderBy('updatedAt', 'desc'),
-      limit(20)
+      firestoreLimit(20)
     );
 
     const unsubscribe = onSnapshot(q, (snap) => {
@@ -132,26 +267,6 @@ export const AdminAgentView: React.FC = () => {
 
     return () => unsubscribe();
   }, [activeChatId]);
-
-  useEffect(() => {
-    // Collect some baseline project data for the agent's context
-    const fetchContext = async () => {
-      try {
-        const productsSnap = await getDocs(query(collection(db, 'products'), limit(5)));
-        const salesSnap = await getDocs(query(collection(db, 'sales'), limit(5)));
-        const settingsSnap = await getDocs(collection(db, 'settings'));
-        
-        setProjectStats({
-          productsCount: productsSnap.size,
-          lastSales: salesSnap.docs.map(d => d.data()),
-          businessSettings: settingsSnap.docs.find(d => d.id === 'business')?.data()
-        });
-      } catch (err) {
-        console.error("Context fetch error:", err);
-      }
-    };
-    fetchContext();
-  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -253,38 +368,80 @@ export const AdminAgentView: React.FC = () => {
         })
       }));
 
-      const systemInstruction = `Eres "Pepa Intelligence", el agente experto definitivo del proyecto Restaurante Doña Pepa.
+      const systemInstruction = `Eres "Pepa Intelligence", el agente experto definitivo del restaurante Doña Pepa.
+      
+      FECHA/HORA ACTUAL: ${new Date().toISOString()} (Usa esto para calcular "ayer", "está semana", etc.)
       
       ESTADO DEL PROYECTO:
-      - Tecnología: React 19, TypeScript, Vite, Tailwind CSS, Framer Motion, Firebase (Auth & Firestore).
-      - Módulos Activos: POS (Ventas), Inventario, Gestión de Usuarios, Catálogo Digital, Detalle de Productos.
-      - Diseño: Brutalista Moderno / High Performance.
-      - Branding: Doña Pepa - Sabor Tradicional desde 1957. Cúcuta, Colombia.
+      - Tecnología: React 19, TypeScript, Vite, Tailwind CSS, Firebase.
+      - Doña Pepa: Sabor Tradicional desde 1957. Cúcuta, Colombia.
       
       TUS CAPACIDADES:
-      1. PROGRAMACIÓN: Eres un experto en TypeScript y Firebase. Puedes sugerir refactorizaciones, nuevas features y optimizaciones de consultas.
-      2. DISEÑO & BRANDING: Eres un Lead Creative Director. Sugieres paletas de colores, mejoras en la UI/UX y estrategias de marca.
-      3. SEO & DIGITAL: Analizas cómo mejorar el posicionamiento del menú digital.
-      4. DATA ANALYST: Puedes interpretar datos de ventas y tendencias (basado en el contexto proporcionado).
-      5. VISIÓN & DOCUMENTOS: Puedes analizar imágenes (menús, locales, bocetos) y archivos de texto para extraer información o hacer sugerencias.
+      1. ANÁLISIS DE DATOS: Tienes acceso a herramientas para consultar ventas, inventario y productos. 
+         - SIEMPRE que el usuario pida análisis de ventas, usa un 'limitCount' generoso (ej: 100 o más) para no omitir datos.
+         - Para peticiones como "ayer" o fechas específicas, calcula el rango ISO (de 00:00:00 a 23:59:59) y úsalo en 'startDate' y 'endDate'.
+         - No inventes datos. Si los resultados están limitados, menciónalo.
+      2. PROGRAMACIÓN: Experto en TypeScript y Firebase.
+      3. DISEÑO: Sugerencias de UI/UX Brutalista.
+      4. VISIÓN: Puedes analizar imágenes y documentos adjuntos.
+      5. MARKETING (GOOGLE ADS): Puedes crear y gestionar campañas.
+         - Antes de crear una campaña, analiza qué productos se venden más para recomendarlos.
+         - Si Google Ads no está conectado, indica al usuario que use el botón "Conectar Google Ads".
       
-      CONTEXTO DINÁMICO: ${JSON.stringify(projectStats)}
-      
-      REGLAS DE RESPUESTA:
-      - Sé profesional, directo y audaz.
-      - Si sugieres código, utiliza bloques de Markdown con el lenguaje especificado (ej. \`\`\`tsx).
-      - Siempre ten en cuenta que el usuario es el Administrador Principal del restaurante.
+      REGLAS DE ORO:
+      - Sé profesional, audaz, analítico y muy preciso con los números.
+      - Compara los datos obtenidos (ventas) con el catálogo de productos para dar insights reales.
       - Idioma: Español.`;
 
       const ai = getAiClient();
-      const response = await ai.models.generateContent({
+      let currentHistory: any[] = history.map(m => ({
+        role: m.role,
+        parts: m.parts
+      }));
+      currentHistory.push({ role: 'user', parts: userParts });
+
+      // Initial call to check for tools
+      let response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: [...history, { role: 'user', parts: userParts }],
+        contents: currentHistory,
         config: {
           systemInstruction,
           temperature: 0.7,
+          tools
         }
       });
+
+      // Handle function calls recursively (max 3 turns to avoid infinite loops)
+      let turnCount = 0;
+      while (response.functionCalls && turnCount < 3) {
+        turnCount++;
+        const toolResults = await Promise.all(
+          response.functionCalls.map(async (call) => {
+            const result = await executeTool(call);
+            return {
+              functionResponse: {
+                name: call.name,
+                response: { content: result },
+                id: call.id
+              }
+            };
+          })
+        );
+
+        // Add model's call and results to history
+        currentHistory.push(response.candidates?.[0]?.content);
+        currentHistory.push({ role: 'user', parts: toolResults });
+
+        response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: currentHistory,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+            tools
+          }
+        });
+      }
 
       const aiMessage: Message = {
         role: 'model',
@@ -358,6 +515,21 @@ export const AdminAgentView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {googleAdsTokens ? (
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-black uppercase tracking-widest border border-blue-200">
+              <Sparkles className="w-3 h-3" />
+              Ads Conectado
+            </div>
+          ) : (
+            <button 
+              onClick={handleGoogleAdsConnect}
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition shadow-sm"
+            >
+              <SeoIcon className="w-3 h-3" />
+              Conectar Google Ads
+            </button>
+          )}
+
           <button 
             onClick={createNewChat}
             className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-black transition"
@@ -438,9 +610,9 @@ export const AdminAgentView: React.FC = () => {
                   </h3>
                   <div className="grid grid-cols-1 gap-2">
                     {[
+                      { icon: Database, label: 'Data Analysis', color: 'text-green-600' },
                       { icon: Code, label: 'Arquitectura', color: 'text-blue-600' },
                       { icon: Palette, label: 'Design', color: 'text-pink-600' },
-                      { icon: SeoIcon, label: 'SEO', color: 'text-orange-600' },
                       { icon: Terminal, label: 'Firebase', color: 'text-amber-600' },
                     ].map(spec => (
                       <div key={spec.label} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-gray-100 shadow-sm text-[10px] font-bold text-gray-700">

@@ -1,0 +1,164 @@
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import { fileURLToPath } from "url";
+import { google } from "googleapis";
+import { GoogleAdsApi } from "google-ads-api";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json());
+
+  // OAuth Google Setup
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_ADS_CLIENT_ID,
+    process.env.GOOGLE_ADS_CLIENT_SECRET,
+    // Redirect URI will be dynamic based on the request origin as per skill
+  );
+
+  // API Routes
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  // Get Auth URL
+  app.get("/api/auth/google-ads/url", (req, res) => {
+    const clientOrigin = req.query.origin as string;
+    const origin = clientOrigin || req.headers.origin || `${req.protocol}://${req.get('host')}`;
+    const redirectUri = `${origin}/auth/callback`;
+    
+    // We pass the origin in the state parameter to retrieve it in the callback
+    const state = Buffer.from(JSON.stringify({ origin })).toString('base64');
+
+    const url = oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: ["https://www.googleapis.com/auth/adwords"],
+      prompt: "consent",
+      redirect_uri: redirectUri,
+      state: state
+    });
+    res.json({ url });
+  });
+
+  // Callback
+  app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
+    const { code, state } = req.query;
+    
+    let origin = "";
+    try {
+      if (state) {
+        const decodedState = JSON.parse(Buffer.from(state as string, 'base64').toString());
+        origin = decodedState.origin;
+      }
+    } catch (e) {
+      console.error("Error decoding state:", e);
+    }
+
+    if (!origin) {
+      origin = `${req.protocol}://${req.get('host')}`.replace('http://', 'https://');
+    }
+
+    const redirectUri = `${origin}/auth/callback`;
+
+    try {
+      if (!process.env.GOOGLE_ADS_CLIENT_ID || !process.env.GOOGLE_ADS_CLIENT_SECRET) {
+        throw new Error("Missing Client ID or Secret in environment variables");
+      }
+
+      const { tokens } = await oauth2Client.getToken({
+        code: code as string,
+        redirect_uri: redirectUri
+      });
+      
+      // In a real app, you'd save these to a database (Firestore)
+      // For now, we'll send them back or log them (Careful with security)
+      // Ideally Pepa should be able to read these from Firestore
+      
+      console.log("Tokens received:", tokens);
+
+      res.send(`
+        <html>
+          <body style="font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;">
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'GOOGLE_ADS_AUTH_SUCCESS', tokens: ${JSON.stringify(tokens)} }, '*');
+                window.close();
+              } else {
+                window.location.href = '/';
+              }
+            </script>
+            <h1>Autenticación Exitosa</h1>
+            <p>Puedes cerrar esta ventana.</p>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error("Error exchanging code for tokens:", error);
+      res.status(500).send("Error en la autenticación");
+    }
+  });
+
+  // Tool to create campaign (to be called by Pepa)
+  app.post("/api/ads/create-campaign", async (req, res) => {
+    const { tokens, campaignData } = req.body;
+    
+    if (!tokens || !process.env.GOOGLE_ADS_DEVELOPER_TOKEN) {
+      return res.status(400).json({ error: "Missing tokens or developer token" });
+    }
+
+    try {
+      const client = new GoogleAdsApi({
+        client_id: process.env.GOOGLE_ADS_CLIENT_ID!,
+        client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
+        developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
+      });
+
+      const customer = client.Customer({
+        customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID!,
+        refresh_token: tokens.refresh_token,
+      });
+
+      // Dummy implementation of campaign creation
+      // This is complex, so we'll start with a check
+      const result = await customer.report({
+        entity: "campaign",
+        metrics: ["campaign.name", "campaign.status"],
+        limit: 1,
+      });
+
+      res.json({ message: "Conexión con Google Ads exitosa. Creación de campaña en desarrollo.", result });
+    } catch (error: any) {
+      console.error("Ads API Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();
