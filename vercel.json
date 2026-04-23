@@ -1,12 +1,12 @@
 {
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
+      "source": "/api/(.*)",
+      "destination": "/server.ts"
     },
     {
-      "source": "/auth/:path*",
-      "destination": "/auth/:path*"
+      "source": "/auth/(.*)",
+      "destination": "/server.ts"
     },
     {
       "source": "/(.*)",

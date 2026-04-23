@@ -11,18 +11,18 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const app = express();
+
+// OAuth Google Setup
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_ADS_CLIENT_ID,
+  process.env.GOOGLE_ADS_CLIENT_SECRET,
+);
+
 async function startServer() {
-  const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
-
-  // OAuth Google Setup
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_ADS_CLIENT_ID,
-    process.env.GOOGLE_ADS_CLIENT_SECRET,
-    // Redirect URI will be dynamic based on the request origin as per skill
-  );
 
   // API Routes
   app.get("/api/health", (req, res) => {
@@ -180,8 +180,12 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+if (process.env.NODE_ENV !== "test") {
+  startServer();
+}
+
+export default app;
