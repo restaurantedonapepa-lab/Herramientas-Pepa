@@ -76,7 +76,9 @@ async function startServer() {
     }
 
     if (!origin) {
-      origin = `${req.protocol}://${req.get('host')}`.replace('http://', 'https://');
+      // In production (Vercel/Cloud Run), we trust the host header and force https
+      const host = req.get('host');
+      origin = host?.includes('localhost') ? `http://${host}` : `https://${host}`;
     }
 
     const redirectUri = `${origin}/auth/callback`;

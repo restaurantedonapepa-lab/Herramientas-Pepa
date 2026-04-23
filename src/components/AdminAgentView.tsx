@@ -23,6 +23,7 @@ import {
   Layout,
   Database
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import { useCart } from '../context/CartContext';
