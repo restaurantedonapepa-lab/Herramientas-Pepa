@@ -170,9 +170,13 @@ export const AdminAgentView: React.FC = () => {
     try {
       const origin = window.location.origin;
       const resp = await fetch(`/api/auth/google-ads/url?origin=${encodeURIComponent(origin)}`);
-      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        throw new Error(data.details || data.error || `Server returned ${resp.status}`);
+      }
       
-      const { url } = await resp.json();
+      const { url } = data;
       
       if (!url) {
         throw new Error("No se recibió la URL de autenticación. Verifica las variables de entorno en el servidor.");
@@ -185,8 +189,9 @@ export const AdminAgentView: React.FC = () => {
       popup.close();
       Swal.fire({
         icon: 'error',
-        title: 'Error de conexión',
-        text: err.message || 'No se pudo iniciar el proceso de autenticación. Verifica que el servidor esté configurado correctamente.'
+        title: 'Error de configuración',
+        text: err.message || 'No se pudo iniciar el proceso de autenticación. Verifica que el servidor de Vercel tenga las variables GOOGLE_ADS_CLIENT_ID y CLIENT_SECRET.',
+        footer: 'Asegúrate de haber hecho deploy en Vercel después de agregar las variables.'
       });
     }
   };

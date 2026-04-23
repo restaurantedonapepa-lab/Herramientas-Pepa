@@ -31,21 +31,34 @@ async function startServer() {
 
   // Get Auth URL
   app.get("/api/auth/google-ads/url", (req, res) => {
-    const clientOrigin = req.query.origin as string;
-    const origin = clientOrigin || req.headers.origin || `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${origin}/auth/callback`;
-    
-    // We pass the origin in the state parameter to retrieve it in the callback
-    const state = Buffer.from(JSON.stringify({ origin })).toString('base64');
+    try {
+      if (!process.env.GOOGLE_ADS_CLIENT_ID || !process.env.GOOGLE_ADS_CLIENT_SECRET) {
+        console.error("Missing Google Ads credentials in environment variables");
+        return res.status(500).json({ 
+          error: "Configuración incompleta", 
+          details: "Faltan las variables GOOGLE_ADS_CLIENT_ID o CLIENT_SECRET en el servidor/Vercel." 
+        });
+      }
 
-    const url = oauth2Client.generateAuthUrl({
-      access_type: "offline",
-      scope: ["https://www.googleapis.com/auth/adwords"],
-      prompt: "consent",
-      redirect_uri: redirectUri,
-      state: state
-    });
-    res.json({ url });
+      const clientOrigin = req.query.origin as string;
+      const origin = clientOrigin || req.headers.origin || `${req.protocol}://${req.get('host')}`;
+      const redirectUri = `${origin}/auth/callback`;
+      
+      // We pass the origin in the state parameter to retrieve it in the callback
+      const state = Buffer.from(JSON.stringify({ origin })).toString('base64');
+
+      const url = oauth2Client.generateAuthUrl({
+        access_type: "offline",
+        scope: ["https://www.googleapis.com/auth/adwords"],
+        prompt: "consent",
+        redirect_uri: redirectUri,
+        state: state
+      });
+      res.json({ url });
+    } catch (error: any) {
+      console.error("Error generating auth URL:", error);
+      res.status(500).json({ error: "Error interno", details: error.message });
+    }
   });
 
   // Callback
