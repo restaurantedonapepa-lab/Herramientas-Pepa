@@ -371,12 +371,12 @@ export const POSView: React.FC = () => {
 
     // 2. IMPRESIÓN NORMAL (FALLBACK)
     const htmlItems = activeTable.items.map(i => `
-        <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:4px; font-size:13px;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:4px; font-size:13px; font-family: Verdana, Tahoma, sans-serif;">
             <div style="display:flex; flex:1; margin-right:10px;">
                 <span style="white-space:nowrap; margin-right:5px; font-weight:bold;">${i.quantity} x</span>
                 <span style="text-align:left; line-height:1.2;">${i.name}</span>
             </div>
-            ${type === 'customer' ? `<div style="white-space:nowrap; font-weight:bold; min-width:60px; text-align:right;">$${(i.price * i.quantity).toLocaleString('es-CO')}</div>` : ''}
+            ${type === 'customer' ? `<div style="white-space:nowrap; min-width:60px; text-align:right;">$${(i.price * i.quantity).toLocaleString('es-CO')}</div>` : ''}
         </div>
         ${i.note ? `<div style="font-size: 11px; color: #333; margin-left: 25px; margin-bottom: 6px; font-style: italic;">* ${i.note}</div>` : ''}
     `).join('');
@@ -387,7 +387,7 @@ export const POSView: React.FC = () => {
       const printWindow = window.open('', '_blank');
       if (!printWindow) return;
       printWindow.document.write(`
-        <html><body style="font-family:'Segoe UI', Roboto, Helvetica, Arial, sans-serif; width:72mm; padding:5px; color:black;">
+        <html><body style="font-family: Verdana, Tahoma, sans-serif; width:72mm; padding:5px; color:black;">
           <h2 style="text-align:center; margin-bottom:5px;">${businessName}</h2>
           <p style="text-align:center;">*** ${type === 'customer' ? 'CUENTA' : 'COMANDA'} ***</p>
           <hr>
@@ -404,7 +404,7 @@ export const POSView: React.FC = () => {
           <hr>
           ${htmlItems}
           <hr>
-          ${type === 'customer' ? `<h3 style="text-align:right;">TOTAL: $${total.toLocaleString('es-CO')}</h3>` : ''}
+          ${type === 'customer' ? `<div style="text-align:right; font-size:16px;"><strong>TOTAL:</strong> $${total.toLocaleString('es-CO')}</div>` : ''}
         </body></html>
       `);
       printWindow.document.close();
@@ -415,7 +415,7 @@ export const POSView: React.FC = () => {
     }
     
     printArea.innerHTML = `
-        <div style="width: 100%; text-align: center; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:black; font-size:13px;">
+        <div style="width: 100%; text-align: center; font-family: Verdana, Tahoma, sans-serif; color:black; font-size:13px;">
             <h2 style="margin:0; font-size:18px; font-weight:bold;">${businessName}</h2>
             <p style="margin:0; font-size:14px; font-weight:bold;">*** ${type === 'customer' ? 'Nota de Pedido' : 'Comanda Cocina'} ***</p>
             <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
@@ -442,8 +442,8 @@ export const POSView: React.FC = () => {
             <div style="border-bottom:1px dashed black; margin:5px 0;"></div>
             
             ${type === 'customer' ? `
-            <div style="text-align:right; font-size:16px; font-weight:bold; margin-top:5px;">
-                <p style="margin: 0;">TOTAL: $${total.toLocaleString('es-CO')}</p>
+            <div style="text-align:right; font-size:16px; margin-top:5px;">
+                <p style="margin: 0;"><strong>TOTAL:</strong> $${total.toLocaleString('es-CO')}</p>
             </div>
             ` : ''}
             

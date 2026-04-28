@@ -166,10 +166,9 @@ class PrinterService {
       result = result
         .align('right')
         .bold(true)
-        .size('double')
-        .line(`TOTAL: $${data.total.toLocaleString('es-CO')}`)
-        .size('normal')
+        .text('TOTAL: ')
         .bold(false)
+        .line(`$${data.total.toLocaleString('es-CO')}`)
         .align('center');
     }
 
