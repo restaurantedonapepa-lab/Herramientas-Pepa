@@ -353,7 +353,7 @@ export const POSView: React.FC = () => {
           businessName: businessName,
           table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : activeTable.number.toString(),
           client: client,
-          items: activeTable.items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price })),
+          items: activeTable.items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price, note: i.note })),
           total: total,
           type: type,
           shippingInfo: activeTable.shippingInfo ? {
@@ -371,12 +371,14 @@ export const POSView: React.FC = () => {
 
     // 2. IMPRESIÓN NORMAL (FALLBACK)
     const htmlItems = activeTable.items.map(i => `
-        <div style="display:flex; align-items:flex-start; margin-bottom:4px; font-size:12px;">
-            <div style="white-space:nowrap; margin-right:5px; font-weight:bold;">${i.quantity} x</div>
-            <div style="flex:1; text-align:left; padding-right:5px; line-height:1.2;">${i.name}</div>
-            ${type === 'customer' ? `<div style="white-space:nowrap; font-weight:bold;">$${(i.price * i.quantity).toLocaleString('es-CO')}</div>` : ''}
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:4px; font-size:13px;">
+            <div style="display:flex; flex:1; margin-right:10px;">
+                <span style="white-space:nowrap; margin-right:5px; font-weight:bold;">${i.quantity} x</span>
+                <span style="text-align:left; line-height:1.2;">${i.name}</span>
+            </div>
+            ${type === 'customer' ? `<div style="white-space:nowrap; font-weight:bold; min-width:60px; text-align:right;">$${(i.price * i.quantity).toLocaleString('es-CO')}</div>` : ''}
         </div>
-        ${i.note ? `<div style="font-size: 10px; color: #666; margin-left: 25px; margin-bottom: 4px;">* ${i.note}</div>` : ''}
+        ${i.note ? `<div style="font-size: 11px; color: #333; margin-left: 25px; margin-bottom: 6px; font-style: italic;">* ${i.note}</div>` : ''}
     `).join('');
 
     const printArea = document.getElementById('printable-area');
@@ -385,8 +387,8 @@ export const POSView: React.FC = () => {
       const printWindow = window.open('', '_blank');
       if (!printWindow) return;
       printWindow.document.write(`
-        <html><body style="font-family:monospace; width:80mm; padding:10px;">
-          <h2 style="text-align:center;">${businessName}</h2>
+        <html><body style="font-family:'Segoe UI', Roboto, Helvetica, Arial, sans-serif; width:72mm; padding:5px; color:black;">
+          <h2 style="text-align:center; margin-bottom:5px;">${businessName}</h2>
           <p style="text-align:center;">*** ${type === 'customer' ? 'CUENTA' : 'COMANDA'} ***</p>
           <hr>
           <p>Mesa: ${activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `MESA ${activeTable.number}`} - ${client}</p>
@@ -413,7 +415,7 @@ export const POSView: React.FC = () => {
     }
     
     printArea.innerHTML = `
-        <div style="width: 100%; text-align: center; font-family: monospace; color:black;">
+        <div style="width: 100%; text-align: center; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:black; font-size:13px;">
             <h2 style="margin:0; font-size:18px; font-weight:bold;">${businessName}</h2>
             <p style="margin:0; font-size:14px; font-weight:bold;">*** ${type === 'customer' ? 'Nota de Pedido' : 'Comanda Cocina'} ***</p>
             <div style="border-bottom:1px dashed black; margin:5px 0;"></div>

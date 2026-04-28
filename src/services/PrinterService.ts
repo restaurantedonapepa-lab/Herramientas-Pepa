@@ -4,7 +4,7 @@ export interface TicketData {
   businessName: string;
   table: string;
   client: string;
-  items: { name: string; quantity: number; price: number }[];
+  items: { name: string; quantity: number; price: number; note?: string }[];
   total: number;
   type?: 'customer' | 'kitchen';
   shippingInfo?: {
@@ -144,12 +144,19 @@ class PrinterService {
     }
 
     data.items.forEach(item => {
-      const qtyStr = `${item.quantity} x `.padEnd(6);
-      const nameStr = item.name.substring(0, 18);
-      result = result.line(`${qtyStr}${nameStr}`);
-      if (data.type !== 'kitchen') {
-        const priceStr = `$${(item.price * item.quantity).toLocaleString('es-CO')}`;
-        result = result.align('right').line(priceStr).align('left');
+      const qtyStr = `${item.quantity} x `;
+      const priceStr = data.type !== 'kitchen' ? `$${(item.price * item.quantity).toLocaleString('es-CO')}` : '';
+      
+      // Assume 32 characters total for narrow thermal paper (58mm)
+      // If 80mm, it usually has 42-48, but 32 is a safe common denominator
+      const lineLen = 32;
+      const spaceForName = Math.max(5, lineLen - qtyStr.length - priceStr.length - 1);
+      const nameStr = item.name.substring(0, spaceForName).padEnd(spaceForName);
+      
+      result = result.line(`${qtyStr}${nameStr} ${priceStr}`);
+      
+      if (item.note) {
+        result = result.line(`  * ${item.note}`);
       }
     });
 
