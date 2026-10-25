@@ -3398,9 +3398,10 @@ export const POSView: React.FC = () => {
                           <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
                             <td className="py-4 text-sm font-bold">
                               {(() => {
+                                if (!sale.timestamp) return 'Sin fecha';
                                 const d = sale.timestamp?.toDate ? sale.timestamp.toDate() : new Date(sale.timestamp);
                                 const isValid = d instanceof Date && !isNaN(d.getTime());
-                                return isValid ? d.toLocaleString('es-CO') : 'Fecha no válida';
+                                return isValid ? d.toLocaleString('es-CO') : `Error (${typeof sale.timestamp})`;
                               })()}
                             </td>
                             <td className="py-4 text-sm font-black">{sale.table}</td>
