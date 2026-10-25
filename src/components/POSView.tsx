@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, onSnapshot, addDoc, updateDoc, doc, 
   increment, serverTimestamp, query, where, getDocs,
-  setDoc, orderBy, deleteDoc, deleteField, getDoc
+  setDoc, orderBy, deleteDoc, deleteField, getDoc, limit
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, getDriveImageUrl, auth } from '../firebase';
 import { Product, Ingredient, SaleItem, Table, Sale, Expense, BusinessSettings } from '../types';
@@ -12,7 +12,7 @@ import {
   Minus, MessageSquare, Edit2, Save, X, History, 
   ChartLine, RefreshCw, CheckCircle2, Calendar,
   LayoutGrid, UtensilsCrossed, Split, ChevronLeft, ChevronRight, Printer, Globe,
-  FileText, Settings
+  FileText, Settings, Receipt
 } from 'lucide-react';
 import { printerService } from '../services/PrinterService';
 import { motion, AnimatePresence } from 'motion/react';
@@ -26,6 +26,21 @@ import Swal from 'sweetalert2';
 import Papa from 'papaparse';
 import { writeBatch } from 'firebase/firestore';
 import { useCart } from '../context/CartContext';
+import { 
+  getLocalSales, 
+  saveLocalSale, 
+  saveMultipleLocalSales, 
+  updateLocalSale, 
+  getLocalExpenses, 
+  saveLocalExpense, 
+  saveMultipleLocalExpenses 
+} from '../utils/salesStorage';
+import { 
+  normalizePaymentMethod, 
+  parseSalePaymentMethods, 
+  saleMatchesMethod, 
+  getMethodAmountFromSale 
+} from '../utils/paymentUtils';
 import {
   DndContext,
   closestCenter,
@@ -120,13 +135,48 @@ export const POSView: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const getTodayDate = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    try {
+      return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    } catch {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+  };
+
+  const getYesterdayDate = () => {
+    try {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    } catch {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+  };
+
+  const getMonthStartDate = () => {
+    const today = getTodayDate();
+    return today.substring(0, 8) + '01';
+  };
+
+  const getSaleDateString = (timestamp: any): string => {
+    if (!timestamp) return '';
+    const d = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+    } catch {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
   };
 
   // Report States
   const [reportRange, setReportRange] = useState({ start: getTodayDate(), end: getTodayDate() });
   const [reportTab, setReportTab] = useState<'ventas' | 'gastos' | 'graficos' | 'creditos'>('ventas');
+  const [reportVentasSubTab, setReportVentasSubTab] = useState<'ventas' | 'platos'>('ventas');
+  const [reportMethodFilter, setReportMethodFilter] = useState<string>('todos');
+  const [historyMethodFilter, setHistoryMethodFilter] = useState<string>('todos');
   const [reportData, setReportData] = useState<{ sales: Sale[], expenses: Expense[] }>({ sales: [], expenses: [] });
   const [historyData, setHistoryData] = useState<Sale[]>([]);
   const [historyDate, setHistoryDate] = useState(getTodayDate());
@@ -570,41 +620,154 @@ export const POSView: React.FC = () => {
   const fetchReportData = async () => {
     if (!reportRange.start || !reportRange.end) return;
     
+    // 1. Inmediatamente cargar del almacenamiento local para respuesta instantánea y soporte sin conexión
+    const localSales = getLocalSales();
+    const localExpenses = getLocalExpenses();
+
+    const isAllRange = reportRange.start <= '2025-01-01' && reportRange.end >= '2026-12-31';
+
+    const filterSalesByDate = (s: Sale) => {
+      if (isAllRange) return true;
+      const dStr = getSaleDateString(s.timestamp);
+      return dStr ? (dStr >= reportRange.start && dStr <= reportRange.end) : true;
+    };
+
+    const filterExpensesByDate = (e: Expense) => {
+      if (isAllRange) return true;
+      const dStr = getSaleDateString(e.timestamp);
+      return dStr ? (dStr >= reportRange.start && dStr <= reportRange.end) : true;
+    };
+
+    const filteredLocalSales = localSales.filter(filterSalesByDate);
+    const filteredLocalExpenses = localExpenses.filter(filterExpensesByDate);
+
+    setReportData({
+      sales: filteredLocalSales,
+      expenses: filteredLocalExpenses
+    });
+
+      // 2. Intentar consultar Firestore de fondo
     try {
-      // Usar formato local T00:00:00 para que coincida con la zona horaria del navegador
-      const start = new Date(reportRange.start + 'T00:00:00');
-      const end = new Date(reportRange.end + 'T23:59:59');
-      
-      const salesQuery = query(collection(db, 'sales'), where('timestamp', '>=', start), where('timestamp', '<=', end));
-      const expensesQuery = query(collection(db, 'expenses'), where('timestamp', '>=', start), where('timestamp', '<=', end));
+      const salesQuery = query(collection(db, 'sales'), orderBy('timestamp', 'desc'), limit(500));
+      const expensesQuery = query(collection(db, 'expenses'), orderBy('timestamp', 'desc'), limit(200));
 
       const [salesSnap, expensesSnap] = await Promise.all([getDocs(salesQuery), getDocs(expensesQuery)]);
 
+      const remoteSales = salesSnap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as Sale));
+      const remoteExpenses = expensesSnap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as Expense));
+
+      // Guardar en almacenamiento local persistente
+      if (remoteSales.length > 0) saveMultipleLocalSales(remoteSales);
+      if (remoteExpenses.length > 0) saveMultipleLocalExpenses(remoteExpenses);
+
+      // Combinar local y remoto deduplicando por ID
+      const salesMap = new Map<string, Sale>();
+      localSales.forEach(s => { if (s?.id) salesMap.set(s.id, s); });
+      remoteSales.forEach(s => { if (s?.id) salesMap.set(s.id, s); });
+
+      const expensesMap = new Map<string, Expense>();
+      localExpenses.forEach(e => { if (e?.id) expensesMap.set(e.id, e); });
+      remoteExpenses.forEach(e => { if (e?.id) expensesMap.set(e.id, e); });
+
+      const finalSales = Array.from(salesMap.values()).filter(filterSalesByDate);
+      const finalExpenses = Array.from(expensesMap.values()).filter(filterExpensesByDate);
+
       setReportData({
-        sales: salesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)),
-        expenses: expensesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense))
+        sales: finalSales,
+        expenses: finalExpenses
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, 'reports');
+      console.warn('Consulta Firestore no disponible temporalmente, usando datos locales:', error);
     }
   };
 
   const fetchHistoryData = async () => {
+    const isAll = historyDate === 'todos';
+
+    // 1. Inmediatamente cargar del almacenamiento local
+    const localSales = getLocalSales();
+    const filteredLocal = localSales.filter(s => {
+      if (isAll) return true;
+      const dStr = getSaleDateString(s.timestamp);
+      return dStr ? dStr === historyDate : true;
+    }).sort((a, b) => {
+      const tA = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : new Date(a.timestamp).getTime();
+      const tB = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : new Date(b.timestamp).getTime();
+      return (tB || 0) - (tA || 0);
+    });
+
+    setHistoryData(filteredLocal);
+
+    // 2. Intentar consultar Firestore
     try {
-      const start = new Date(historyDate + 'T00:00:00');
-      const end = new Date(historyDate + 'T23:59:59');
-      const q = query(
-        collection(db, 'sales'), 
-        where('timestamp', '>=', start),
-        where('timestamp', '<=', end),
-        orderBy('timestamp', 'desc')
-      );
+      const q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'), limit(400));
       const snap = await getDocs(q);
-      setHistoryData(snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale)));
+      const remoteSales = snap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as Sale));
+      if (remoteSales.length > 0) saveMultipleLocalSales(remoteSales);
+
+      const salesMap = new Map<string, Sale>();
+      localSales.forEach(s => { if (s?.id) salesMap.set(s.id, s); });
+      remoteSales.forEach(s => { if (s?.id) salesMap.set(s.id, s); });
+
+      const finalHistory = Array.from(salesMap.values()).filter(s => {
+        if (isAll) return true;
+        const dStr = getSaleDateString(s.timestamp);
+        return dStr ? dStr === historyDate : true;
+      }).sort((a, b) => {
+        const tA = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : new Date(a.timestamp).getTime();
+        const tB = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : new Date(b.timestamp).getTime();
+        return (tB || 0) - (tA || 0);
+      });
+
+      setHistoryData(finalHistory);
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, 'sales');
+      console.warn('Historial Firestore no disponible temporalmente, usando datos locales:', error);
     }
   };
+
+  const historyStats = useMemo(() => {
+    const validSales = historyData.filter(s => s.status !== 'cancelled');
+    const cancelledSales = historyData.filter(s => s.status === 'cancelled');
+    const totalValid = validSales.reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+    const totalCancelled = cancelledSales.reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+    
+    let nequiTotal = 0;
+    let efectivoTotal = 0;
+    let daviplataTotal = 0;
+    let tarjetaTotal = 0;
+    let qrTotal = 0;
+
+    validSales.forEach(sale => {
+      const parsed = parseSalePaymentMethods(sale);
+      if (parsed.isCredit) return;
+      nequiTotal += parsed.methodTotals['Nequi'] || 0;
+      efectivoTotal += parsed.methodTotals['Efectivo'] || 0;
+      daviplataTotal += parsed.methodTotals['Daviplata'] || 0;
+      tarjetaTotal += parsed.methodTotals['Tarjeta'] || 0;
+      qrTotal += parsed.methodTotals['QR'] || 0;
+    });
+
+    const isCreditSale = (s: Sale) => normalizePaymentMethod(s.paymentMethod) === 'Crédito';
+    const directSales = validSales.filter(s => !s.isCreditPayment && !isCreditSale(s)).reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+    const creditPayments = validSales.filter(s => Boolean(s.isCreditPayment) && !isCreditSale(s)).reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+    const creditSales = validSales.filter(s => isCreditSale(s)).reduce((acc, s) => acc + (Number(s.total) || 0), 0);
+
+    return {
+      validCount: validSales.length,
+      cancelledCount: cancelledSales.length,
+      totalValid,
+      totalCancelled,
+      directSales,
+      creditPayments,
+      creditSales,
+      nequiTotal,
+      efectivoTotal,
+      daviplataTotal,
+      tarjetaTotal,
+      qrTotal,
+      digitalTotal: nequiTotal + daviplataTotal + tarjetaTotal + qrTotal
+    };
+  }, [historyData]);
 
   useEffect(() => { if (showReportsModal) fetchReportData(); }, [showReportsModal, reportRange]);
   useEffect(() => { if (showHistoryModal) fetchHistoryData(); }, [showHistoryModal, historyDate]);
@@ -789,12 +952,23 @@ export const POSView: React.FC = () => {
             }
           }
         }
-        await updateDoc(doc(db, 'sales', saleId), { status: 'cancelled' });
-        
-        // Si es un crédito, buscar la mesa de crédito correspondiente y borrarla
-        const creditTable = tables.find(t => t.isCredit && t.saleId === saleId);
-        if (creditTable) {
-          await deleteDoc(doc(db, 'tables', creditTable.id));
+        updateLocalSale(saleId, { status: 'cancelled' });
+        setHistoryData(prev => prev.map(s => s.id === saleId ? { ...s, status: 'cancelled' } : s));
+        setReportData(prev => ({
+          ...prev,
+          sales: prev.sales.map(s => s.id === saleId ? { ...s, status: 'cancelled' } : s)
+        }));
+
+        try {
+          await updateDoc(doc(db, 'sales', saleId), { status: 'cancelled' });
+          
+          // Si es un crédito, buscar la mesa de crédito correspondiente y borrarla
+          const creditTable = tables.find(t => t.isCredit && t.saleId === saleId);
+          if (creditTable) {
+            await deleteDoc(doc(db, 'tables', creditTable.id));
+          }
+        } catch (cloudErr) {
+          console.warn('Venta anulada localmente:', cloudErr);
         }
 
         Swal.fire('Anulada', 'La venta ha sido anulada e inventario devuelto.', 'success');
@@ -950,62 +1124,69 @@ export const POSView: React.FC = () => {
   };
 
   const printConsumptionReport = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     const itemsHtml = reportStats.itemSales.map(item => `
       <tr>
-        <td style="padding: 8px 0; border-bottom: 1px solid #eee;">${item.name}</td>
-        <td style="padding: 8px 0; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+        <td style="padding: 6px 0; border-bottom: 1px solid #eee;">${item.name}</td>
+        <td style="padding: 6px 0; border-bottom: 1px solid #eee; text-align: center; font-weight: bold;">${item.quantity}</td>
       </tr>
     `).join('');
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Reporte de Consumo</title>
-          <style>
-            body { font-family: 'Helvetica', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
-            .subtitle { font-size: 14px; color: #666; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th { text-align: left; border-bottom: 2px solid #000; padding-bottom: 10px; font-size: 14px; text-transform: uppercase; }
-            .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #999; border-top: 1px dashed #ccc; padding-top: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="title">REPORTE DE CONSUMO</div>
-            <div class="subtitle">(Cantidades vendidas - Sin precios)</div>
-            <div style="font-weight: bold;">Desde: ${reportRange.start} Hasta: ${reportRange.end}</div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th style="text-align: center;">Cant.</th>
-              </tr>
-            </thead>
-            <tbody>${itemsHtml}</tbody>
-          </table>
-          <div class="footer">--- Fin del Reporte ---</div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+    const contentHtml = `
+      <div style="font-family: 'Helvetica', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; color: #111;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="font-size: 22px; font-weight: bold; margin: 0 0 5px 0;">REPORTE DE CONSUMO DE PLATOS</h2>
+          <div style="font-size: 13px; color: #666;">(Cantidades vendidas - Para control de cocina)</div>
+          <div style="font-weight: bold; margin-top: 5px;">Periodo: Del ${reportRange.start} Al ${reportRange.end}</div>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+          <thead>
+            <tr style="border-bottom: 2px solid #000; text-transform: uppercase; font-size: 13px;">
+              <th style="text-align: left; padding-bottom: 8px;">Producto / Plato</th>
+              <th style="text-align: center; padding-bottom: 8px;">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml || '<tr><td colspan="2" style="text-align: center; padding: 12px; color: #999;">Sin platos registrados</td></tr>'}
+          </tbody>
+          <tfoot style="border-top: 2px solid #000; font-weight: bold;">
+            <tr>
+              <td style="padding: 10px 0;">TOTAL UNIDADES:</td>
+              <td style="padding: 10px 0; text-align: center;">${reportStats.totalItemsQuantity} unds</td>
+            </tr>
+          </tfoot>
+        </table>
+        <div style="text-align: center; margin-top: 40px; font-size: 11px; color: #999; border-top: 1px dashed #ccc; padding-top: 15px;">
+          --- Fin del Reporte ---<br>
+          Generado: ${new Date().toLocaleString('es-CO')}
+        </div>
+      </div>
+    `;
+
+    const printArea = document.getElementById('printable-area');
+    if (printArea) {
+      printArea.innerHTML = contentHtml;
+      setTimeout(() => {
+        window.print();
+      }, 100);
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`<html><head><title>Reporte de Consumo</title></head><body>${contentHtml}</body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+    }
   };
 
   const printCashReport = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     const expensesHtml = reportData.expenses.map(e => `
       <tr>
-        <td style="padding: 5px 0;">${new Date(e.timestamp?.toDate()).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' })}</td>
+        <td style="padding: 5px 0;">${new Date(e.timestamp?.toDate ? e.timestamp.toDate() : e.timestamp).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' })}</td>
         <td style="padding: 5px 0;">${e.concept} (${e.category})</td>
-        <td style="padding: 5px 0; text-align: right; color: #ef4444;">-$${e.amount.toLocaleString()}</td>
+        <td style="padding: 5px 0; text-align: right; color: #ef4444;">-$${(Number(e.amount) || 0).toLocaleString()}</td>
       </tr>
     `).join('');
 
@@ -1019,108 +1200,212 @@ export const POSView: React.FC = () => {
 
     const creditsHtml = reportStats.creditSales.map(s => `
       <tr>
-        <td style="padding: 5px 0;">${new Date(s.timestamp?.toDate()).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' })}</td>
-        <td style="padding: 5px 0;">${s.clientName}</td>
-        <td style="padding: 5px 0; text-align: right; color: #f59e0b;">$${s.total.toLocaleString()}</td>
+        <td style="padding: 5px 0;">${new Date(s.timestamp?.toDate ? s.timestamp.toDate() : s.timestamp).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit' })}</td>
+        <td style="padding: 5px 0;">${s.clientName || 'Cliente'}</td>
+        <td style="padding: 5px 0; text-align: right; color: #f59e0b;">$${(Number(s.total) || 0).toLocaleString()}</td>
       </tr>
     `).join('');
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Reporte de Caja</title>
-          <style>
-            body { font-family: 'Helvetica', sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; color: #333; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
-            .business-name { font-size: 18px; margin-bottom: 5px; }
-            .dates { font-size: 14px; margin-bottom: 20px; }
-            .section-title { font-size: 14px; font-weight: bold; background: #f4f4f4; padding: 5px 10px; margin-top: 20px; border-bottom: 2px solid #000; }
-            .summary-row { display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; }
-            .summary-row.total { font-weight: bold; font-size: 16px; border-bottom: 2px solid #000; margin-top: 10px; }
-            .summary-row.balance { font-weight: bold; font-size: 20px; border-bottom: none; background: #f9f9f9; margin-top: 10px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th { text-align: left; border-bottom: 1px solid #000; padding: 5px 0; font-size: 12px; }
-            td { font-size: 12px; }
-            .footer { text-align: center; margin-top: 50px; font-size: 12px; color: #999; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="title">REPORTE DE CAJA</div>
-            <div class="business-name">Doña Pepa</div>
-            <div class="dates">Del: ${reportRange.start} Al: ${reportRange.end}</div>
+    const salesListHtml = reportStats.activeSales.map(s => {
+      const d = s.timestamp?.toDate ? s.timestamp.toDate() : new Date(s.timestamp);
+      const timeStr = !isNaN(d.getTime()) ? d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '';
+      return `
+        <tr style="border-bottom: 1px dotted #eee;">
+          <td style="padding: 4px 0;">${timeStr}</td>
+          <td style="padding: 4px 0; font-weight: bold;">${s.table}</td>
+          <td style="padding: 4px 0;">${s.clientName || 'Mostrador'}</td>
+          <td style="padding: 4px 0; font-weight: bold; text-transform: uppercase; color: ${normalizePaymentMethod(s.paymentMethod) === 'Nequi' ? '#7c3aed' : '#111'};">${s.paymentMethod}</td>
+          <td style="padding: 4px 0; text-align: right; font-weight: bold;">$${(Number(s.total) || 0).toLocaleString()}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const contentHtml = `
+      <div style="font-family: 'Helvetica', sans-serif; padding: 15px; max-width: 800px; margin: 0 auto; color: #111; font-size: 13px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="font-size: 20px; font-weight: bold; margin: 0 0 5px 0;">REPORTE DE CAJA (CUADRE DIARIO)</h2>
+          <div style="font-size: 16px; font-weight: bold; color: #dc2626;">Doña Pepa</div>
+          <div style="font-size: 12px; color: #555; margin-top: 4px;">Periodo: Del ${reportRange.start} Al ${reportRange.end}</div>
+        </div>
+
+        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">1. Resumen de Ingresos (Caja y Bancos)</div>
+        <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc;">
+          <span>Ventas Directas (Contado):</span> <span>$${reportStats.totalDirectSales.toLocaleString()}</span>
+        </div>
+        ${reportStats.totalCreditPayments > 0 ? `
+          <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; color: #2563eb;">
+            <span>Recaudo de Créditos (Cartera Cobrada):</span> <span>$${reportStats.totalCreditPayments.toLocaleString()}</span>
           </div>
+        ` : ''}
+        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 2px solid #111; font-weight: bold; font-size: 14px; background: #f9fafb;">
+          <span>TOTAL INGRESOS A CAJA:</span> <span>$${reportStats.totalSales.toLocaleString()}</span>
+        </div>
 
-          <div class="section-title">RESUMEN</div>
-          ${Object.entries(reportStats.salesByMethod)
-            .filter(([_, value]) => value > 0)
-            .map(([method, value]) => `
-              <div class="summary-row"><span>${method}:</span> <span>$${value.toLocaleString()}</span></div>
-            `).join('')}
-          <div class="summary-row total"><span>TOTAL VENTAS (CAJA):</span> <span>$${reportStats.totalSales.toLocaleString()}</span></div>
-          ${reportStats.totalCreditPayments > 0 ? `
-            <div class="summary-row" style="color: #3b82f6; font-size: 13px;">
-              <span>↳ Recaudo Créditos (Deuda Anterior):</span> 
-              <span>$${reportStats.totalCreditPayments.toLocaleString()}</span>
+        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">2. Desglose por Método de Pago Recibido</div>
+        <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
+          <span>Efectivo:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc; font-weight: bold; color: #7c3aed; background: #faf5ff;">
+          <span>NEQUI (Digital / Bancos):</span> <span>$${(reportStats.salesByMethod['Nequi'] || 0).toLocaleString()}</span>
+        </div>
+        ${(reportStats.salesByMethod['Daviplata'] || 0) > 0 ? `
+          <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
+            <span>Daviplata:</span> <span>$${(reportStats.salesByMethod['Daviplata'] || 0).toLocaleString()}</span>
+          </div>
+        ` : ''}
+        ${(reportStats.salesByMethod['Tarjeta'] || 0) > 0 ? `
+          <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
+            <span>Tarjeta:</span> <span>$${(reportStats.salesByMethod['Tarjeta'] || 0).toLocaleString()}</span>
+          </div>
+        ` : ''}
+        ${(reportStats.salesByMethod['QR'] || 0) > 0 ? `
+          <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
+            <span>QR:</span> <span>$${(reportStats.salesByMethod['QR'] || 0).toLocaleString()}</span>
+          </div>
+        ` : ''}
+        ${Object.entries(reportStats.salesByMethod)
+          .filter(([m, val]) => !['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR'].includes(m) && val > 0)
+          .map(([m, val]) => `
+            <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
+              <span>${m}:</span> <span>$${val.toLocaleString()}</span>
             </div>
-          ` : ''}
-          <div class="summary-row" style="color: #f59e0b;"><span>TOTAL CRÉDITOS:</span> <span>$${reportStats.totalCredits.toLocaleString()}</span></div>
-          <div class="summary-row" style="color: #ef4444;"><span>TOTAL GASTOS:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span></div>
-          <div class="summary-row balance"><span>BALANCE NETO (CAJA):</span> <span>$${reportStats.balance.toLocaleString()}</span></div>
+          `).join('')}
+        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 2px solid #111; font-weight: bold; font-size: 13px; background: #f9fafb;">
+          <span>SUMA DE MÉTODOS DE CAJA:</span> <span>$${reportStats.totalSales.toLocaleString()}</span>
+        </div>
 
-          <div class="section-title">DETALLE DE GASTOS</div>
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Concepto</th>
-                <th style="text-align: right;">Monto</th>
-              </tr>
-            </thead>
-            <tbody>${expensesHtml}</tbody>
-          </table>
+        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">3. Arqueo de Efectivo Físico vs Bancos</div>
+        <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc;">
+          <span>Efectivo Total Recibido:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; color: #dc2626;">
+          <span>(-) Gastos de Operación:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #111; font-weight: bold; color: #15803d; background: #f0fdf4;">
+          <span>(=) EFECTIVO ESPERADO EN CAJÓN FÍSICO:</span> <span>$${reportStats.cashInDrawerExpected.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 2px solid #111; font-weight: bold; color: #7c3aed; background: #faf5ff; margin-top: 4px;">
+          <span>(+) TOTAL EN BANCOS/DIGITAL (Nequi/Daviplata/Tarj/QR):</span> <span>$${reportStats.electronicTotal.toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 10px; font-weight: bold; font-size: 15px; background: #f3f4f6; margin-top: 6px;">
+          <span>BALANCE NETO TOTAL (Caja + Bancos):</span> <span style="color: #2563eb;">$${reportStats.balance.toLocaleString()}</span>
+        </div>
 
-          <div class="section-title">DETALLE PRODUCTOS</div>
-          ${reportStats.totalCreditPayments > 0 ? `
-            <div style="font-size: 10px; color: #666; margin-top: 5px; font-style: italic;">
-              * Nota: El detalle de productos no incluye los platos de los recaudos de créditos ($${reportStats.totalCreditPayments.toLocaleString()}).
-            </div>
-          ` : ''}
-          <table>
-            <thead>
-              <tr>
-                <th>Plato</th>
-                <th style="text-align: center;">Cant.</th>
-                <th style="text-align: right;">Total</th>
-              </tr>
-            </thead>
-            <tbody>${itemsHtml}</tbody>
-          </table>
+        ${reportStats.totalCredits > 0 ? `
+          <div style="font-size: 13px; font-weight: bold; background: #fef3c7; color: #92400e; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #f59e0b; text-transform: uppercase;">4. Créditos Otorgados (Cuentas por Cobrar - No entraron a caja)</div>
+          <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; font-weight: bold;">
+            <span>Total Créditos / Fiados de este periodo:</span> <span style="color: #b45309;">$${reportStats.totalCredits.toLocaleString()}</span>
+          </div>
+        ` : ''}
 
-          ${reportStats.creditSales.length > 0 ? `
-          <div class="section-title">DETALLE CRÉDITOS PENDIENTES</div>
-          <table>
+        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">Detalle de Gastos (${reportData.expenses.length})</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px;">
+          <thead>
+            <tr style="border-bottom: 1px solid #000; text-align: left;">
+              <th style="padding: 4px 0;">Fecha</th>
+              <th style="padding: 4px 0;">Concepto</th>
+              <th style="padding: 4px 0; text-align: right;">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${expensesHtml || '<tr><td colspan="3" style="text-align: center; padding: 8px; color: #999;">Sin gastos registrados</td></tr>'}
+          </tbody>
+          <tfoot style="border-top: 1px solid #000; font-weight: bold;">
+            <tr>
+              <td colspan="2" style="padding: 6px 0;">TOTAL GASTOS:</td>
+              <td style="padding: 6px 0; text-align: right; color: #dc2626;">-$${reportStats.totalExpenses.toLocaleString()}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">Detalle de Platos Vendidos (${reportStats.totalItemsQuantity} unds)</div>
+        <div style="font-size: 10px; color: #666; margin-top: 3px; font-style: italic;">* Incluye platos de ventas directas y a crédito. No incluye recaudos de créditos pasados para evitar duplicación.</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px;">
+          <thead>
+            <tr style="border-bottom: 1px solid #000; text-align: left;">
+              <th style="padding: 4px 0;">Plato</th>
+              <th style="padding: 4px 0; text-align: center;">Cant.</th>
+              <th style="padding: 4px 0; text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml || '<tr><td colspan="3" style="text-align: center; padding: 8px; color: #999;">Sin platos registrados</td></tr>'}
+          </tbody>
+          <tfoot style="border-top: 1px solid #000; font-weight: bold;">
+            <tr>
+              <td style="padding: 6px 0;">TOTAL PLATOS:</td>
+              <td style="padding: 6px 0; text-align: center;">${reportStats.totalItemsQuantity} unds</td>
+              <td style="padding: 6px 0; text-align: right; color: #16a34a;">$${reportStats.totalItemsAmount.toLocaleString()}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        ${reportStats.creditSales.length > 0 ? `
+          <div style="font-size: 13px; font-weight: bold; background: #fef3c7; color: #92400e; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #f59e0b; text-transform: uppercase;">Detalle Créditos Pendientes (${reportStats.creditSales.length})</div>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px;">
             <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Cliente</th>
-                <th style="text-align: right;">Monto</th>
+              <tr style="border-bottom: 1px solid #000; text-align: left;">
+                <th style="padding: 4px 0;">Fecha</th>
+                <th style="padding: 4px 0;">Cliente</th>
+                <th style="padding: 4px 0; text-align: right;">Monto</th>
               </tr>
             </thead>
             <tbody>${creditsHtml}</tbody>
+            <tfoot style="border-top: 1px solid #000; font-weight: bold;">
+              <tr>
+                <td colspan="2" style="padding: 6px 0;">TOTAL CRÉDITOS:</td>
+                <td style="padding: 6px 0; text-align: right; color: #b45309;">$${reportStats.totalCredits.toLocaleString()}</td>
+              </tr>
+            </tfoot>
           </table>
-          ` : ''}
+        ` : ''}
 
-          <div class="footer">
-            --- Fin del Reporte ---<br>
-            Generado: ${new Date().toLocaleString()}
-          </div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+        ${reportStats.activeSales.length > 0 ? `
+          <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">Listado de Ventas del Periodo (${reportStats.activeSales.length})</div>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px;">
+            <thead>
+              <tr style="border-bottom: 1px solid #000; text-align: left;">
+                <th style="padding: 4px 0;">Hora</th>
+                <th style="padding: 4px 0;">Mesa</th>
+                <th style="padding: 4px 0;">Cliente</th>
+                <th style="padding: 4px 0;">Método</th>
+                <th style="padding: 4px 0; text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${salesListHtml}</tbody>
+            <tfoot style="border-top: 1px solid #000; font-weight: bold;">
+              <tr>
+                <td colspan="4" style="padding: 6px 0;">TOTAL ENTRADAS:</td>
+                <td style="padding: 6px 0; text-align: right; color: #16a34a;">$${reportStats.totalSales.toLocaleString()}</td>
+              </tr>
+            </tfoot>
+          </table>
+        ` : ''}
+
+        <div style="text-align: center; margin-top: 40px; font-size: 11px; color: #777; border-top: 1px dashed #ccc; padding-top: 10px;">
+          --- Fin del Reporte de Cuadre ---<br>
+          Generado: ${new Date().toLocaleString('es-CO')}
+        </div>
+      </div>
+    `;
+
+    const printArea = document.getElementById('printable-area');
+    if (printArea) {
+      printArea.innerHTML = contentHtml;
+      setTimeout(() => {
+        window.print();
+      }, 100);
+      return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`<html><head><title>Reporte de Caja - Doña Pepa</title></head><body>${contentHtml}</body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+    }
   };
 
   useEffect(() => {
@@ -1173,71 +1458,169 @@ export const POSView: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view, showPaymentModal, showReportsModal, showExpensesModal, showHistoryModal, paymentMethod]);
 
+  const renderPaymentBadge = (rawMethod: string) => {
+    const parsed = parseSalePaymentMethods({ paymentMethod: rawMethod });
+    if (parsed.isMixed) {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+          {rawMethod}
+        </span>
+      );
+    }
+    const norm = normalizePaymentMethod(rawMethod);
+    if (norm === 'Nequi') {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-purple-100 text-purple-700 border border-purple-300 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+          NEQUI
+        </span>
+      );
+    }
+    if (norm === 'Efectivo') {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-green-100 text-green-700 border border-green-300 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-green-600"></span>
+          EFECTIVO
+        </span>
+      );
+    }
+    if (norm === 'Daviplata') {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-red-100 text-red-700 border border-red-300 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-red-600"></span>
+          DAVIPLATA
+        </span>
+      );
+    }
+    if (norm === 'Tarjeta') {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-blue-100 text-blue-700 border border-blue-300 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+          TARJETA
+        </span>
+      );
+    }
+    if (norm === 'QR') {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-teal-100 text-teal-700 border border-teal-300 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-teal-600"></span>
+          QR
+        </span>
+      );
+    }
+    if (norm === 'Crédito') {
+      return (
+        <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-amber-100 text-amber-700 border border-amber-300 inline-flex items-center gap-1.5 shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-amber-600"></span>
+          A CRÉDITO
+        </span>
+      );
+    }
+    return (
+      <span className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-gray-100 text-gray-700 border border-gray-200">
+        {rawMethod || 'Efectivo'}
+      </span>
+    );
+  };
+
   const reportStats = useMemo(() => {
     const activeSales = reportData.sales.filter(s => s.status !== 'cancelled');
-    const totalSales = activeSales.filter(s => s.paymentMethod !== 'Crédito').reduce((sum, s) => sum + s.total, 0);
-    const totalCreditPayments = activeSales.filter(s => s.isCreditPayment && s.paymentMethod !== 'Crédito').reduce((sum, s) => sum + s.total, 0);
-    const totalCredits = activeSales.filter(s => s.paymentMethod === 'Crédito').reduce((sum, s) => sum + s.total, 0);
-    const totalExpenses = reportData.expenses.reduce((sum, e) => sum + e.amount, 0);
-    
-    const salesByCategory: Record<string, number> = {};
-    const salesByItem: Record<string, { name: string, quantity: number, total: number }> = {};
-    
-    activeSales.forEach(sale => {
-      if (sale.isCreditPayment) return;
-      sale.items.forEach(item => {
-        const prod = products.find(p => p.id === item.productId);
-        const cat = prod?.category || 'Otros';
-        salesByCategory[cat] = (salesByCategory[cat] || 0) + (item.price * item.quantity);
-        
-        if (!salesByItem[item.productId]) {
-          salesByItem[item.productId] = { name: item.name, quantity: 0, total: 0 };
-        }
-        salesByItem[item.productId].quantity += item.quantity;
-        salesByItem[item.productId].total += (item.price * item.quantity);
-      });
-    });
+    const cancelledSales = reportData.sales.filter(s => s.status === 'cancelled');
 
+    // Identificar si una venta es a crédito otorgado
+    const isCreditSale = (s: Sale) => normalizePaymentMethod(s.paymentMethod) === 'Crédito';
+
+    // a) Ventas directas cobradas de contado hoy (Efectivo, Nequi, etc.)
+    const directSales = activeSales.filter(s => !s.isCreditPayment && !isCreditSale(s));
+    const totalDirectSales = directSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+
+    // b) Recaudo de créditos (pagos de cuentas por cobrar cobrados hoy)
+    const creditPaymentSales = activeSales.filter(s => Boolean(s.isCreditPayment) && !isCreditSale(s));
+    const totalCreditPayments = creditPaymentSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+
+    // c) Créditos nuevos otorgados hoy (comida fiada / por cobrar)
+    const creditSales = activeSales.filter(s => isCreditSale(s));
+    const totalCredits = creditSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+
+    // TOTAL INGRESOS QUE ENTRARON A CAJA / BANCOS = Ventas Directas + Recaudos
+    const totalCashIncome = totalDirectSales + totalCreditPayments;
+
+    // Total Gastos
+    const totalExpenses = reportData.expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+    // Balance Neto de Caja = Ingresos Reales - Gastos
+    const netCashBalance = totalCashIncome - totalExpenses;
+
+    // Métodos de Pago Reales de Dinero Entrado a Caja
     const salesByMethod: Record<string, number> = {
       'Efectivo': 0,
       'Nequi': 0,
-      'Tarjeta': 0,
       'Daviplata': 0,
-      'QR': 0,
-      'Crédito': 0
+      'Tarjeta': 0,
+      'QR': 0
     };
-    
+
     activeSales.forEach(sale => {
-      const method = sale.paymentMethod.split(':')[0].trim();
-      if (method === 'Mixto') {
-        // Parse mixed payment string: "Mixto: Efectivo ($10.000), Nequi ($5.000)"
-        const parts = sale.paymentMethod.split(': ')[1].split(', ');
-        parts.forEach(p => {
-          const [m, vStr] = p.split(' ($');
-          const mName = m.trim();
-          const val = Number(vStr.replace(')', '').replace(/\./g, ''));
-          if (salesByMethod[mName] !== undefined) {
-            salesByMethod[mName] += val;
-          } else {
-            salesByMethod[mName] = (salesByMethod[mName] || 0) + val;
-          }
-        });
-      } else {
-        salesByMethod[method] = (salesByMethod[method] || 0) + sale.total;
+      const parsed = parseSalePaymentMethods(sale);
+      if (parsed.isCredit) return;
+      for (const [method, amount] of Object.entries(parsed.methodTotals)) {
+        salesByMethod[method] = (salesByMethod[method] || 0) + amount;
       }
     });
 
+    // Arqueo físico de caja vs cuentas bancarias
+    const cashInDrawerExpected = (salesByMethod['Efectivo'] || 0) - totalExpenses;
+    const electronicTotal = totalCashIncome - (salesByMethod['Efectivo'] || 0);
+
+    // Detalle de platos / productos vendidos
+    const salesByCategory: Record<string, number> = {};
+    const salesByItem: Record<string, { name: string, quantity: number, total: number }> = {};
+    let totalItemsQuantity = 0;
+    let totalItemsAmount = 0;
+
+    activeSales.forEach(sale => {
+      if (sale.isCreditPayment) return; // No duplicar platos en recaudos
+      if (!Array.isArray(sale.items)) return;
+
+      sale.items.forEach(item => {
+        const itemPrice = Number(item.price) || 0;
+        const itemQty = Number(item.quantity) || 0;
+        const lineTotal = itemPrice * itemQty;
+
+        const key = item.name ? item.name.trim() : (item.productId || 'Varios');
+        if (!salesByItem[key]) {
+          salesByItem[key] = { name: item.name || 'Producto', quantity: 0, total: 0 };
+        }
+        salesByItem[key].quantity += itemQty;
+        salesByItem[key].total += lineTotal;
+        totalItemsQuantity += itemQty;
+        totalItemsAmount += lineTotal;
+
+        const prod = products.find(p => p.id === item.productId);
+        const cat = prod?.category || 'Otros';
+        salesByCategory[cat] = (salesByCategory[cat] || 0) + lineTotal;
+      });
+    });
+
     return {
-      totalSales,
-      totalCredits,
+      totalSales: totalCashIncome,
+      totalDirectSales,
       totalCreditPayments,
+      totalCredits,
       totalExpenses,
-      balance: totalSales - totalExpenses,
+      balance: netCashBalance,
+      cashInDrawerExpected,
+      electronicTotal,
       categoryData: Object.entries(salesByCategory).map(([name, value]) => ({ name, value })),
-      methodData: Object.entries(salesByMethod).map(([name, value]) => ({ name, value })),
+      methodData: Object.entries(salesByMethod).filter(([_, val]) => val > 0).map(([name, value]) => ({ name, value })),
       itemSales: Object.values(salesByItem).sort((a, b) => b.total - a.total),
+      totalItemsQuantity,
+      totalItemsAmount,
       salesByMethod,
-      creditSales: activeSales.filter(s => s.paymentMethod === 'Crédito')
+      creditSales,
+      cancelledSales,
+      activeSales
     };
   }, [reportData, products]);
 
@@ -1413,15 +1796,47 @@ export const POSView: React.FC = () => {
         finalPaymentMethod = `Mixto: ${methods.join(', ')}`;
       }
 
-      await addDoc(collection(db, 'sales'), {
+      const localSaleId = `sale_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const now = new Date();
+      const newSale: Sale = {
+        id: localSaleId,
         items: itemsToPay,
         total,
         paymentMethod: finalPaymentMethod,
         clientName: activeTable.clientName || 'Mostrador',
         table: activeTable.isCredit ? `CREDITO ${activeTable.number}` : (activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`),
-        timestamp: serverTimestamp(),
-        isCreditPayment: activeTable.isCredit || false
-      });
+        timestamp: now.toISOString(),
+        isCreditPayment: activeTable.isCredit || false,
+        status: 'active'
+      };
+
+      // 1. Guardar de inmediato en almacenamiento local persistente
+      saveLocalSale(newSale);
+
+      // 2. Refrescar estado en memoria al instante para que Cuadre e Historial lo muestren sin demora
+      setReportData(prev => ({
+        ...prev,
+        sales: [newSale, ...prev.sales.filter(s => s.id !== localSaleId)]
+      }));
+      setHistoryData(prev => [newSale, ...prev.filter(s => s.id !== localSaleId)]);
+
+      // 3. Sincronizar en Firestore
+      try {
+        const docRef = await addDoc(collection(db, 'sales'), {
+          items: itemsToPay,
+          total,
+          paymentMethod: finalPaymentMethod,
+          clientName: activeTable.clientName || 'Mostrador',
+          table: activeTable.isCredit ? `CREDITO ${activeTable.number}` : (activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`),
+          timestamp: serverTimestamp(),
+          isCreditPayment: activeTable.isCredit || false
+        });
+        if (docRef?.id) {
+          updateLocalSale(localSaleId, { id: docRef.id });
+        }
+      } catch (fireErr) {
+        console.warn('Venta guardada en memoria local segura (Firestore offline/cuota):', fireErr);
+      }
 
       // Solo descontar inventario si NO es un pago de un crédito ya registrado
       if (!activeTable.isCredit) {
@@ -1508,15 +1923,39 @@ export const POSView: React.FC = () => {
     if (result.isConfirmed) {
       setIsProcessing(true);
       try {
-        // 1. Registrar la venta como crédito
-        const saleRef = await addDoc(collection(db, 'sales'), {
+        const localCreditSaleId = `credit_sale_${Date.now()}`;
+        const creditSaleObj: Sale = {
+          id: localCreditSaleId,
           items: activeTable.items,
           total: orderTotal,
           paymentMethod: 'Crédito',
           clientName: activeTable.clientName,
           table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`,
-          timestamp: serverTimestamp()
-        });
+          timestamp: new Date().toISOString(),
+          status: 'active'
+        };
+        saveLocalSale(creditSaleObj);
+        setReportData(prev => ({ ...prev, sales: [creditSaleObj, ...prev.sales] }));
+        setHistoryData(prev => [creditSaleObj, ...prev]);
+
+        // 1. Registrar la venta como crédito en Firestore
+        let saleDocId = localCreditSaleId;
+        try {
+          const saleRef = await addDoc(collection(db, 'sales'), {
+            items: activeTable.items,
+            total: orderTotal,
+            paymentMethod: 'Crédito',
+            clientName: activeTable.clientName,
+            table: activeTable.number < 1 ? `DOM ${Math.round(activeTable.number * 100)}` : `Mesa ${activeTable.number}`,
+            timestamp: serverTimestamp()
+          });
+          if (saleRef?.id) {
+            saleDocId = saleRef.id;
+            updateLocalSale(localCreditSaleId, { id: saleDocId });
+          }
+        } catch (saleErr) {
+          console.warn('Crédito guardado en almacenamiento local seguro:', saleErr);
+        }
 
         // 2. Descontar inventario
         for (const item of activeTable.items) {
@@ -1544,7 +1983,7 @@ export const POSView: React.FC = () => {
           status: 'busy',
           lastUpdate: serverTimestamp(),
           isCredit: true,
-          saleId: saleRef.id
+          saleId: saleDocId
         });
 
         // 4. Limpiar la mesa original
@@ -2002,7 +2441,25 @@ export const POSView: React.FC = () => {
                 <div className="flex justify-between items-center mb-4 lg:mb-8 flex-shrink-0"><h3 className="text-xl lg:text-2xl font-black text-gray-800">Método de Pago</h3><button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button></div>
                 <div className="grid grid-cols-3 gap-3 mb-8 flex-shrink-0">
                   {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Mixto'].map(m => (
-                    <button key={m} onClick={() => setPaymentMethod(m as any)} className={cn("py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", paymentMethod === m ? "bg-red-50 border-red-600 text-red-800" : "bg-white border-gray-100 text-gray-400 hover:border-gray-200")}>{m}</button>
+                    <button 
+                      key={m} 
+                      onClick={() => {
+                        setPaymentMethod(m as any);
+                        if (m !== 'Efectivo' && m !== 'Mixto') {
+                          setReceivedAmount(currentTotalToPay);
+                        }
+                      }} 
+                      className={cn(
+                        "py-4 rounded-2xl border-2 font-black text-sm transition-all flex flex-col items-center gap-2", 
+                        paymentMethod === m 
+                          ? (m === 'Nequi' 
+                              ? "bg-purple-600 text-white border-purple-700 shadow-md scale-105" 
+                              : "bg-red-50 border-red-600 text-red-800")
+                          : "bg-white border-gray-100 text-gray-400 hover:border-gray-200"
+                      )}
+                    >
+                      {m}
+                    </button>
                   ))}
                 </div>
                 <div className="flex-1 overflow-y-auto min-h-0 mb-6">
@@ -2100,7 +2557,13 @@ export const POSView: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center text-gray-400"><CheckCircle2 className="w-16 h-16 mb-4 text-green-500" /><p className="font-black uppercase tracking-widest">Monto Asignado</p></div>
+                    <div className="h-full flex flex-col items-center justify-center text-center text-gray-400">
+                      <CheckCircle2 className={cn("w-16 h-16 mb-4", paymentMethod === 'Nequi' ? "text-purple-500" : "text-green-500")} />
+                      <p className={cn("font-black uppercase tracking-widest text-lg", paymentMethod === 'Nequi' ? "text-purple-700" : "text-gray-700")}>
+                        {paymentMethod === 'Nequi' ? 'Pago con Nequi Asignado' : 'Monto Asignado'}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1 font-bold">Transferencia exacta por ${currentTotalToPay.toLocaleString()}</p>
+                    </div>
                   )}
                 </div>
                 <button 
@@ -2109,9 +2572,14 @@ export const POSView: React.FC = () => {
                   disabled={
                     isProcessing || (paymentMethod === 'Mixto' 
                       ? (mixedPayments.val1 + mixedPayments.val2 + mixedPayments.val3) < currentTotalToPay
-                      : receivedAmount < currentTotalToPay)
+                      : paymentMethod === 'Efectivo'
+                        ? receivedAmount < currentTotalToPay
+                        : false)
                   } 
-                  className="flex-shrink-0 w-full py-5 bg-red-600 hover:bg-red-700 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all"
+                  className={cn(
+                    "flex-shrink-0 w-full py-5 disabled:bg-gray-100 disabled:text-gray-300 text-white font-black text-xl rounded-3xl shadow-xl transition-all",
+                    paymentMethod === 'Nequi' ? "bg-purple-600 hover:bg-purple-700" : "bg-red-600 hover:bg-red-700"
+                  )}
                 >
                   CONFIRMAR PAGO
                 </button>
@@ -2127,42 +2595,118 @@ export const POSView: React.FC = () => {
               <div className="px-6 py-4 border-b flex justify-between items-center bg-white">
                 <div className="flex items-center gap-3">
                   <ChartLine className="w-6 h-6 text-blue-600" />
-                  <h3 className="text-xl font-black text-gray-800">Informe Financiero</h3>
+                  <div>
+                    <h3 className="text-xl font-black text-gray-800">Cuadre Diario y Reportes</h3>
+                    <p className="text-xs text-gray-400 font-medium">Contabilidad y Arqueo de Caja</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={printConsumptionReport} className="flex items-center gap-2 px-4 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-sm font-bold border border-purple-100 hover:bg-purple-100 transition">
+                  <button onClick={printConsumptionReport} className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-xs font-bold border border-purple-100 hover:bg-purple-100 transition shadow-sm">
                     <LayoutGrid className="w-4 h-4" />
-                    Items
+                    Platos
                   </button>
-                  <button onClick={printCashReport} className="flex items-center gap-2 px-4 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-100 hover:bg-red-100 transition">
-                    <FileText className="w-4 h-4" />
-                    PDF
+                  <button onClick={printCashReport} className="flex items-center gap-2 px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition shadow-sm">
+                    <Printer className="w-4 h-4" />
+                    Imprimir Cuadre
                   </button>
-                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition ml-1">
                     <X className="w-6 h-6 text-gray-400" />
                   </button>
                 </div>
               </div>
 
-              {/* Date Filters */}
-              <div className="px-6 py-4 bg-gray-50 border-b flex items-center gap-3">
-                <div className="flex-1 flex items-center gap-3">
-                  <div className="flex-1 relative">
-                    <input type="date" className="w-full p-2.5 bg-white border rounded-lg font-bold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500" value={reportRange.start} onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} />
+              {/* Date Filters & Quick Presets */}
+              <div className="px-6 py-3.5 bg-gray-50 border-b flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-gray-400 uppercase">Rango:</span>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="date" 
+                      className="p-2 bg-white border rounded-lg font-bold text-gray-700 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" 
+                      value={reportRange.start} 
+                      onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} 
+                    />
+                    <span className="text-gray-400 font-bold">-</span>
+                    <input 
+                      type="date" 
+                      className="p-2 bg-white border rounded-lg font-bold text-gray-700 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" 
+                      value={reportRange.end} 
+                      onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} 
+                    />
                   </div>
-                  <div className="flex-1 relative">
-                    <input type="date" className="w-full p-2.5 bg-white border rounded-lg font-bold text-gray-700 outline-none focus:ring-2 focus:ring-blue-500" value={reportRange.end} onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} />
-                  </div>
+                  <button 
+                    onClick={fetchReportData} 
+                    className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm ml-1" 
+                    title="Actualizar / Consultar"
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
                 </div>
-                <button onClick={fetchReportData} className="p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm">
-                  <Search className="w-6 h-6" />
-                </button>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 self-end md:self-auto">
+                  <button 
+                    onClick={() => setReportRange({ start: getTodayDate(), end: getTodayDate() })}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
+                      reportRange.start === getTodayDate() && reportRange.end === getTodayDate()
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white border text-gray-600 hover:bg-gray-100"
+                    )}
+                  >
+                    Hoy
+                  </button>
+                  <button 
+                    onClick={() => setReportRange({ start: getYesterdayDate(), end: getYesterdayDate() })}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
+                      reportRange.start === getYesterdayDate() && reportRange.end === getYesterdayDate()
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white border text-gray-600 hover:bg-gray-100"
+                    )}
+                  >
+                    Ayer
+                  </button>
+                  <button 
+                    onClick={() => setReportRange({ start: getMonthStartDate(), end: getTodayDate() })}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
+                      reportRange.start === getMonthStartDate() && reportRange.end === getTodayDate()
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white border text-gray-600 hover:bg-gray-100"
+                    )}
+                  >
+                    Este Mes
+                  </button>
+                  <button 
+                    onClick={() => setReportRange({ start: '2026-01-01', end: getTodayDate() })}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
+                      reportRange.start === '2026-01-01' && reportRange.end === getTodayDate()
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white border text-gray-600 hover:bg-gray-100"
+                    )}
+                  >
+                    Todo 2026
+                  </button>
+                  <button 
+                    onClick={() => setReportRange({ start: '2025-01-01', end: '2027-12-31' })}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
+                      reportRange.start === '2025-01-01' && reportRange.end === '2027-12-31'
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white border text-gray-600 hover:bg-gray-100"
+                    )}
+                  >
+                    Todo el Historial
+                  </button>
+                </div>
               </div>
 
               {/* Tabs */}
               <div className="flex border-b bg-white">
                 {[
-                  { id: 'ventas', label: 'Ventas', icon: <ShoppingCart className="w-4 h-4" /> },
+                  { id: 'ventas', label: 'Ventas y Caja', icon: <ShoppingCart className="w-4 h-4" /> },
                   { id: 'creditos', label: 'Créditos', icon: <CreditCard className="w-4 h-4" /> },
                   { id: 'gastos', label: 'Gastos', icon: <Banknote className="w-4 h-4" /> },
                   { id: 'graficos', label: 'Gráficos', icon: <ChartLine className="w-4 h-4" /> }
@@ -2171,7 +2715,7 @@ export const POSView: React.FC = () => {
                     key={tab.id}
                     onClick={() => setReportTab(tab.id as any)}
                     className={cn(
-                      "flex-1 py-4 flex items-center justify-center gap-2 font-black text-sm uppercase tracking-widest transition-all relative",
+                      "flex-1 py-3.5 flex items-center justify-center gap-2 font-black text-xs sm:text-sm uppercase tracking-widest transition-all relative",
                       reportTab === tab.id ? "text-blue-600" : "text-gray-400 hover:text-gray-600"
                     )}
                   >
@@ -2186,68 +2730,374 @@ export const POSView: React.FC = () => {
               <div className="flex-1 overflow-y-auto p-6 bg-white">
                 {reportTab === 'ventas' && (
                   <div className="space-y-6">
-                    {/* Payment Method Cards with Scroll Controls */}
-                    <div className="relative group">
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 -ml-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          onClick={() => reportScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
-                          className="p-2 bg-white shadow-lg rounded-full border border-gray-100 text-gray-600 hover:text-blue-600"
-                        >
-                          <ChevronLeft className="w-5 h-5" />
-                        </button>
-                      </div>
-                      
-                      <div 
-                        ref={reportScrollRef}
-                        className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x snap-mandatory"
-                      >
-                        {['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR', 'Crédito']
-                          .filter(method => (reportStats.salesByMethod[method] || 0) > 0)
-                          .map(method => (
-                            <div key={method} className="flex-shrink-0 w-[160px] bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-center snap-start">
-                              <p className="text-[10px] font-black text-gray-400 uppercase mb-1">{method}</p>
-                              <p className="text-xl font-black text-blue-600">${(reportStats.salesByMethod[method] || 0).toLocaleString()}</p>
-                            </div>
-                          ))}
+                    {/* Payment Method Cards */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-black text-gray-400 uppercase tracking-wider">Métodos de Pago Recibidos (Entradas a Caja)</p>
+                        <p className="text-xs font-bold text-gray-500">
+                          Suma de Métodos: <span className="text-blue-600 font-black">${reportStats.totalSales.toLocaleString()}</span>
+                        </p>
                       </div>
 
-                      <div className="absolute right-0 top-1/2 -translate-y-1/2 -mr-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          onClick={() => reportScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
-                          className="p-2 bg-white shadow-lg rounded-full border border-gray-100 text-gray-600 hover:text-blue-600"
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                        {/* Efectivo */}
+                        <div 
+                          onClick={() => {
+                            setReportVentasSubTab('ventas');
+                            setReportMethodFilter(reportMethodFilter === 'Efectivo' ? 'todos' : 'Efectivo');
+                          }}
+                          className={cn(
+                            "p-3.5 rounded-2xl border text-center cursor-pointer transition shadow-sm",
+                            reportMethodFilter === 'Efectivo' 
+                              ? "bg-green-600 text-white border-green-700 shadow-md scale-102" 
+                              : "bg-green-50/70 border-green-200 text-green-900 hover:bg-green-100/80"
+                          )}
                         >
-                          <ChevronRight className="w-5 h-5" />
-                        </button>
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <span className={cn("w-2 h-2 rounded-full", reportMethodFilter === 'Efectivo' ? "bg-white" : "bg-green-500")} />
+                            <p className={cn("text-[11px] font-black uppercase tracking-wider", reportMethodFilter === 'Efectivo' ? "text-green-100" : "text-green-700")}>Efectivo</p>
+                          </div>
+                          <p className={cn("text-xl font-black", reportMethodFilter === 'Efectivo' ? "text-white" : "text-green-700")}>
+                            ${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}
+                          </p>
+                          <span className={cn("text-[9px] font-bold block mt-0.5", reportMethodFilter === 'Efectivo' ? "text-green-200" : "text-green-600")}>Cajón Físico</span>
+                        </div>
+
+                        {/* Nequi (Destacado) */}
+                        <div 
+                          onClick={() => {
+                            setReportVentasSubTab('ventas');
+                            setReportMethodFilter(reportMethodFilter === 'Nequi' ? 'todos' : 'Nequi');
+                          }}
+                          className={cn(
+                            "p-3.5 rounded-2xl border text-center cursor-pointer transition shadow-sm relative overflow-hidden",
+                            reportMethodFilter === 'Nequi' 
+                              ? "bg-purple-600 text-white border-purple-700 shadow-md scale-102 ring-2 ring-purple-300" 
+                              : "bg-purple-50/80 border-purple-200 text-purple-900 hover:bg-purple-100/90"
+                          )}
+                        >
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <span className={cn("w-2 h-2 rounded-full", reportMethodFilter === 'Nequi' ? "bg-white animate-pulse" : "bg-purple-600")} />
+                            <p className={cn("text-[11px] font-black uppercase tracking-wider", reportMethodFilter === 'Nequi' ? "text-purple-100" : "text-purple-700")}>NEQUI</p>
+                          </div>
+                          <p className={cn("text-xl font-black", reportMethodFilter === 'Nequi' ? "text-white" : "text-purple-700")}>
+                            ${(reportStats.salesByMethod['Nequi'] || 0).toLocaleString()}
+                          </p>
+                          <span className={cn("text-[9px] font-bold block mt-0.5", reportMethodFilter === 'Nequi' ? "text-purple-200" : "text-purple-600")}>Digital / Banco</span>
+                        </div>
+
+                        {/* Daviplata */}
+                        <div 
+                          onClick={() => {
+                            setReportVentasSubTab('ventas');
+                            setReportMethodFilter(reportMethodFilter === 'Daviplata' ? 'todos' : 'Daviplata');
+                          }}
+                          className={cn(
+                            "p-3.5 rounded-2xl border text-center cursor-pointer transition shadow-sm",
+                            reportMethodFilter === 'Daviplata' 
+                              ? "bg-red-600 text-white border-red-700 shadow-md scale-102" 
+                              : "bg-red-50/70 border-red-200 text-red-900 hover:bg-red-100/80"
+                          )}
+                        >
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <span className={cn("w-2 h-2 rounded-full", reportMethodFilter === 'Daviplata' ? "bg-white" : "bg-red-500")} />
+                            <p className={cn("text-[11px] font-black uppercase tracking-wider", reportMethodFilter === 'Daviplata' ? "text-red-100" : "text-red-700")}>Daviplata</p>
+                          </div>
+                          <p className={cn("text-xl font-black", reportMethodFilter === 'Daviplata' ? "text-white" : "text-red-700")}>
+                            ${(reportStats.salesByMethod['Daviplata'] || 0).toLocaleString()}
+                          </p>
+                          <span className={cn("text-[9px] font-bold block mt-0.5", reportMethodFilter === 'Daviplata' ? "text-red-200" : "text-red-600")}>Digital / Banco</span>
+                        </div>
+
+                        {/* Tarjeta */}
+                        <div 
+                          onClick={() => {
+                            setReportVentasSubTab('ventas');
+                            setReportMethodFilter(reportMethodFilter === 'Tarjeta' ? 'todos' : 'Tarjeta');
+                          }}
+                          className={cn(
+                            "p-3.5 rounded-2xl border text-center cursor-pointer transition shadow-sm",
+                            reportMethodFilter === 'Tarjeta' 
+                              ? "bg-blue-600 text-white border-blue-700 shadow-md scale-102" 
+                              : "bg-blue-50/70 border-blue-200 text-blue-900 hover:bg-blue-100/80"
+                          )}
+                        >
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <span className={cn("w-2 h-2 rounded-full", reportMethodFilter === 'Tarjeta' ? "bg-white" : "bg-blue-500")} />
+                            <p className={cn("text-[11px] font-black uppercase tracking-wider", reportMethodFilter === 'Tarjeta' ? "text-blue-100" : "text-blue-700")}>Tarjeta</p>
+                          </div>
+                          <p className={cn("text-xl font-black", reportMethodFilter === 'Tarjeta' ? "text-white" : "text-blue-700")}>
+                            ${(reportStats.salesByMethod['Tarjeta'] || 0).toLocaleString()}
+                          </p>
+                          <span className={cn("text-[9px] font-bold block mt-0.5", reportMethodFilter === 'Tarjeta' ? "text-blue-200" : "text-blue-600")}>Datáfono / Bold</span>
+                        </div>
+
+                        {/* QR */}
+                        <div 
+                          onClick={() => {
+                            setReportVentasSubTab('ventas');
+                            setReportMethodFilter(reportMethodFilter === 'QR' ? 'todos' : 'QR');
+                          }}
+                          className={cn(
+                            "p-3.5 rounded-2xl border text-center cursor-pointer transition shadow-sm",
+                            reportMethodFilter === 'QR' 
+                              ? "bg-teal-600 text-white border-teal-700 shadow-md scale-102" 
+                              : "bg-teal-50/70 border-teal-200 text-teal-900 hover:bg-teal-100/80"
+                          )}
+                        >
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <span className={cn("w-2 h-2 rounded-full", reportMethodFilter === 'QR' ? "bg-white" : "bg-teal-500")} />
+                            <p className={cn("text-[11px] font-black uppercase tracking-wider", reportMethodFilter === 'QR' ? "text-teal-100" : "text-teal-700")}>QR</p>
+                          </div>
+                          <p className={cn("text-xl font-black", reportMethodFilter === 'QR' ? "text-white" : "text-teal-700")}>
+                            ${(reportStats.salesByMethod['QR'] || 0).toLocaleString()}
+                          </p>
+                          <span className={cn("text-[9px] font-bold block mt-0.5", reportMethodFilter === 'QR' ? "text-teal-200" : "text-teal-600")}>Código QR</span>
+                        </div>
+
+                        {/* Créditos Otorgados */}
+                        <div 
+                          onClick={() => {
+                            setReportVentasSubTab('ventas');
+                            setReportMethodFilter(reportMethodFilter === 'Crédito' ? 'todos' : 'Crédito');
+                          }}
+                          className={cn(
+                            "p-3.5 rounded-2xl border text-center cursor-pointer transition shadow-sm",
+                            reportMethodFilter === 'Crédito' 
+                              ? "bg-amber-600 text-white border-amber-700 shadow-md scale-102" 
+                              : "bg-amber-50/70 border-amber-200 text-amber-900 hover:bg-amber-100/80"
+                          )}
+                        >
+                          <div className="flex items-center justify-center gap-1.5 mb-1">
+                            <span className={cn("w-2 h-2 rounded-full", reportMethodFilter === 'Crédito' ? "bg-white" : "bg-amber-500")} />
+                            <p className={cn("text-[11px] font-black uppercase tracking-wider", reportMethodFilter === 'Crédito' ? "text-amber-100" : "text-amber-700")}>Fiados</p>
+                          </div>
+                          <p className={cn("text-xl font-black", reportMethodFilter === 'Crédito' ? "text-white" : "text-amber-600")}>
+                            ${reportStats.totalCredits.toLocaleString()}
+                          </p>
+                          <span className={cn("text-[9px] font-bold block mt-0.5", reportMethodFilter === 'Crédito' ? "text-amber-200" : "text-amber-600")}>Por Cobrar</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Sales Table */}
-                    <div className="border rounded-xl overflow-hidden">
-                      <table className="w-full text-left">
-                        <thead className="bg-gray-50 border-b">
-                          <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
-                            <th className="px-6 py-4">Plato</th>
-                            <th className="px-6 py-4 text-center">Cant.</th>
-                            <th className="px-6 py-4 text-right">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {reportStats.itemSales.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 transition">
-                              <td className="px-6 py-4 text-sm font-bold text-gray-700">{item.name}</td>
-                              <td className="px-6 py-4 text-sm font-black text-center text-gray-900">{item.quantity}</td>
-                              <td className="px-6 py-4 text-sm font-bold text-right text-green-600">${item.total.toLocaleString()}</td>
-                            </tr>
+                    {/* Sub-Tab Navigation: Listado de Ventas vs Detalle de Platos */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-3">
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setReportVentasSubTab('ventas')}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2",
+                            reportVentasSubTab === 'ventas' ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          )}
+                        >
+                          <Receipt className="w-4 h-4" />
+                          Listado de Ventas ({reportStats.activeSales.length})
+                        </button>
+                        <button 
+                          onClick={() => setReportVentasSubTab('platos')}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-2",
+                            reportVentasSubTab === 'platos' ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          )}
+                        >
+                          <LayoutGrid className="w-4 h-4" />
+                          Detalle de Platos ({reportStats.totalItemsQuantity} unds)
+                        </button>
+                      </div>
+
+                      {reportVentasSubTab === 'ventas' && (
+                        <div className="flex flex-wrap items-center gap-1.5 self-end sm:self-auto">
+                          <span className="text-[11px] font-black text-gray-400 uppercase mr-1">Filtrar:</span>
+                          {[
+                            { id: 'todos', label: 'Todas' },
+                            { id: 'Nequi', label: 'Solo Nequi' },
+                            { id: 'Efectivo', label: 'Solo Efectivo' },
+                            { id: 'Daviplata', label: 'Daviplata' },
+                            { id: 'Tarjeta', label: 'Tarjeta' },
+                            { id: 'Crédito', label: 'A Crédito' }
+                          ].map(f => (
+                            <button
+                              key={f.id}
+                              onClick={() => setReportMethodFilter(f.id)}
+                              className={cn(
+                                "px-2.5 py-1 rounded-lg text-xs font-black transition",
+                                reportMethodFilter === f.id
+                                  ? (f.id === 'Nequi' 
+                                      ? "bg-purple-600 text-white shadow-sm" 
+                                      : f.id === 'Efectivo' 
+                                        ? "bg-green-600 text-white shadow-sm" 
+                                        : "bg-gray-900 text-white shadow-sm")
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              )}
+                            >
+                              {f.label}
+                            </button>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Sub-tab 1: Listado de Ventas */}
+                    {reportVentasSubTab === 'ventas' && (
+                      <div>
+                        {reportMethodFilter !== 'todos' && (
+                          <div className="mb-3 flex items-center justify-between bg-blue-50/60 px-4 py-2 rounded-xl border border-blue-100 text-xs">
+                            <span className="font-bold text-blue-900">
+                              Filtrando por: <strong className="uppercase">{reportMethodFilter}</strong>
+                            </span>
+                            <button 
+                              onClick={() => setReportMethodFilter('todos')} 
+                              className="text-blue-600 hover:underline font-bold"
+                            >
+                              Mostrar todas las ventas
+                            </button>
+                          </div>
+                        )}
+                        <div className="border rounded-2xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left">
+                            <thead className="bg-gray-50 border-b">
+                              <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                                <th className="px-4 py-3.5">Hora / Fecha</th>
+                                <th className="px-4 py-3.5">Mesa / Tipo</th>
+                                <th className="px-4 py-3.5">Cliente</th>
+                                <th className="px-4 py-3.5">Método de Pago</th>
+                                <th className="px-4 py-3.5">Items</th>
+                                <th className="px-4 py-3.5 text-right">Total</th>
+                                <th className="px-4 py-3.5 text-right">Acción</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {reportStats.activeSales
+                                .filter(s => saleMatchesMethod(s, reportMethodFilter))
+                                .map((sale) => {
+                                  const saleDate = sale.timestamp?.toDate ? sale.timestamp.toDate() : new Date(sale.timestamp);
+                                  const timeStr = !isNaN(saleDate.getTime()) 
+                                    ? saleDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) 
+                                    : '--:--';
+                                  const itemsSummary = Array.isArray(sale.items) 
+                                    ? sale.items.map(i => `${i.quantity}x ${i.name}`).join(', ') 
+                                    : 'Sin items';
+
+                                  return (
+                                    <tr key={sale.id} className="hover:bg-gray-50 transition">
+                                      <td className="px-4 py-3 text-sm font-bold text-gray-700 whitespace-nowrap">
+                                        {timeStr}
+                                      </td>
+                                      <td className="px-4 py-3 text-sm font-black text-gray-900 whitespace-nowrap">
+                                        {sale.table}
+                                      </td>
+                                      <td className="px-4 py-3 text-sm font-medium text-gray-600 truncate max-w-[150px]">
+                                        {sale.clientName || 'Mostrador'}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        {renderPaymentBadge(sale.paymentMethod)}
+                                      </td>
+                                      <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[200px]" title={itemsSummary}>
+                                        {itemsSummary}
+                                      </td>
+                                      <td className="px-4 py-3 text-sm font-black text-right text-gray-900 whitespace-nowrap">
+                                        ${(Number(sale.total) || 0).toLocaleString()}
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <div className="flex justify-end gap-1">
+                                          <button 
+                                            onClick={() => viewSale(sale)} 
+                                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition" 
+                                            title="Ver Tiquet"
+                                          >
+                                            <FileText className="w-4 h-4" />
+                                          </button>
+                                          <button 
+                                            onClick={() => printSale(sale)} 
+                                            className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition" 
+                                            title="Imprimir Tiquet"
+                                          >
+                                            <Printer className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+
+                              {reportStats.activeSales.filter(s => saleMatchesMethod(s, reportMethodFilter)).length === 0 && (
+                                <tr>
+                                  <td colSpan={7} className="px-6 py-12 text-center text-gray-400 italic">
+                                    No hay ventas registradas con el filtro seleccionado en este periodo
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                            <tfoot className="bg-gray-50 border-t font-black">
+                              <tr>
+                                <td colSpan={5} className="px-4 py-3 text-sm text-gray-800">
+                                  {reportMethodFilter === 'todos' 
+                                    ? 'TOTAL VENTAS REGISTRADAS' 
+                                    : `SUBTOTAL ${reportMethodFilter.toUpperCase()}:`}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right text-green-600">
+                                  ${reportStats.activeSales
+                                    .filter(s => saleMatchesMethod(s, reportMethodFilter))
+                                    .reduce((sum, s) => sum + (reportMethodFilter === 'todos' ? (Number(s.total) || 0) : getMethodAmountFromSale(s, reportMethodFilter)), 0)
+                                    .toLocaleString()}
+                                </td>
+                                <td></td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sub-tab 2: Detalle de Platos Vendidos */}
+                    {reportVentasSubTab === 'platos' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-black text-gray-400 uppercase tracking-wider">Detalle de Platos Vendidos</p>
+                          <p className="text-xs text-gray-400 italic">Total: {reportStats.totalItemsQuantity} unidades</p>
+                        </div>
+                        <div className="border rounded-2xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left">
+                            <thead className="bg-gray-50 border-b">
+                              <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                                <th className="px-6 py-3.5">Plato</th>
+                                <th className="px-6 py-3.5 text-center">Cant.</th>
+                                <th className="px-6 py-3.5 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {reportStats.itemSales.map((item, idx) => (
+                                <tr key={idx} className="hover:bg-gray-50 transition">
+                                  <td className="px-6 py-3.5 text-sm font-bold text-gray-700">{item.name}</td>
+                                  <td className="px-6 py-3.5 text-sm font-black text-center text-gray-900">{item.quantity}</td>
+                                  <td className="px-6 py-3.5 text-sm font-bold text-right text-green-600">${item.total.toLocaleString()}</td>
+                                </tr>
+                              ))}
+                              {reportStats.itemSales.length === 0 && (
+                                <tr>
+                                  <td colSpan={3} className="px-6 py-8 text-center text-gray-400 italic">No hay platos registrados en este periodo</td>
+                                </tr>
+                              )}
+                            </tbody>
+                            {reportStats.itemSales.length > 0 && (
+                              <tfoot className="bg-gray-50 border-t font-black">
+                                <tr>
+                                  <td className="px-6 py-3.5 text-sm text-gray-800">TOTAL PLATOS VENDIDOS</td>
+                                  <td className="px-6 py-3.5 text-sm text-center text-gray-900">{reportStats.totalItemsQuantity} unds</td>
+                                  <td className="px-6 py-3.5 text-sm text-right text-green-700">${reportStats.totalItemsAmount.toLocaleString()}</td>
+                                </tr>
+                              </tfoot>
+                            )}
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {reportTab === 'creditos' && (
                   <div className="space-y-6">
-                    <div className="border rounded-xl overflow-hidden">
+                    <div className="border rounded-xl overflow-hidden shadow-sm">
                       <table className="w-full text-left">
                         <thead className="bg-gray-50 border-b">
                           <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
@@ -2260,18 +3110,26 @@ export const POSView: React.FC = () => {
                           {reportStats.creditSales.map((sale) => (
                             <tr key={sale.id} className="hover:bg-gray-50 transition">
                               <td className="px-6 py-4 text-sm font-medium text-gray-500">
-                                {new Date(sale.timestamp?.toDate()).toLocaleDateString('es-CO')}
+                                {new Date(sale.timestamp?.toDate ? sale.timestamp.toDate() : sale.timestamp).toLocaleDateString('es-CO')}
                               </td>
                               <td className="px-6 py-4 text-sm font-bold text-gray-700">{sale.clientName}</td>
-                              <td className="px-6 py-4 text-sm font-bold text-right text-amber-600">${sale.total.toLocaleString()}</td>
+                              <td className="px-6 py-4 text-sm font-bold text-right text-amber-600">${(Number(sale.total) || 0).toLocaleString()}</td>
                             </tr>
                           ))}
                           {reportStats.creditSales.length === 0 && (
                             <tr>
-                              <td colSpan={3} className="px-6 py-12 text-center text-gray-400 italic">No hay créditos pendientes en este periodo</td>
+                              <td colSpan={3} className="px-6 py-12 text-center text-gray-400 italic">No hay créditos otorgados en este periodo</td>
                             </tr>
                           )}
                         </tbody>
+                        {reportStats.creditSales.length > 0 && (
+                          <tfoot className="bg-gray-50 border-t font-black">
+                            <tr>
+                              <td colSpan={2} className="px-6 py-4 text-sm text-gray-800">TOTAL CRÉDITOS OTORGADOS (POR COBRAR)</td>
+                              <td className="px-6 py-4 text-sm text-right text-amber-600">${reportStats.totalCredits.toLocaleString()}</td>
+                            </tr>
+                          </tfoot>
+                        )}
                       </table>
                     </div>
                   </div>
@@ -2279,7 +3137,7 @@ export const POSView: React.FC = () => {
 
                 {reportTab === 'gastos' && (
                   <div className="space-y-6">
-                    <div className="border rounded-xl overflow-hidden">
+                    <div className="border rounded-xl overflow-hidden shadow-sm">
                       <table className="w-full text-left">
                         <thead className="bg-gray-50 border-b">
                           <tr className="text-xs font-black text-gray-500 uppercase tracking-widest">
@@ -2293,10 +3151,23 @@ export const POSView: React.FC = () => {
                             <tr key={expense.id} className="hover:bg-gray-50 transition">
                               <td className="px-6 py-4 text-sm font-bold text-gray-700">{expense.concept}</td>
                               <td className="px-6 py-4 text-sm font-medium text-gray-500">{expense.category}</td>
-                              <td className="px-6 py-4 text-sm font-bold text-right text-red-600">-${expense.amount.toLocaleString()}</td>
+                              <td className="px-6 py-4 text-sm font-bold text-right text-red-600">-${(Number(expense.amount) || 0).toLocaleString()}</td>
                             </tr>
                           ))}
+                          {reportData.expenses.length === 0 && (
+                            <tr>
+                              <td colSpan={3} className="px-6 py-12 text-center text-gray-400 italic">No hay gastos registrados en este periodo</td>
+                            </tr>
+                          )}
                         </tbody>
+                        {reportData.expenses.length > 0 && (
+                          <tfoot className="bg-gray-50 border-t font-black">
+                            <tr>
+                              <td colSpan={2} className="px-6 py-4 text-sm text-gray-800">TOTAL GASTOS REGISTRADOS</td>
+                              <td className="px-6 py-4 text-sm text-right text-red-600">-${reportStats.totalExpenses.toLocaleString()}</td>
+                            </tr>
+                          </tfoot>
+                        )}
                       </table>
                     </div>
                   </div>
@@ -2320,21 +3191,54 @@ export const POSView: React.FC = () => {
                 )}
               </div>
 
-              {/* Footer */}
-              <div className="px-8 py-6 bg-gray-50 border-t">
-                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 text-sm font-bold gap-4">
-                  <div className="flex flex-wrap gap-4 lg:gap-8">
-                    <p className="text-gray-500">Ventas (Caja): <span className="text-green-600 font-black">${reportStats.totalSales.toLocaleString()}</span></p>
-                    {reportStats.totalCreditPayments > 0 && (
-                      <p className="text-blue-500">Recaudo Créditos: <span className="font-black">${reportStats.totalCreditPayments.toLocaleString()}</span></p>
-                    )}
-                    <p className="text-gray-500">Créditos (Pendientes): <span className="text-amber-600 font-black">${reportStats.totalCredits.toLocaleString()}</span></p>
-                    <p className="text-gray-500">Gastos: <span className="text-red-600 font-black">-${reportStats.totalExpenses.toLocaleString()}</span></p>
+              {/* Footer Cuadre Diario */}
+              <div className="px-6 lg:px-8 py-5 bg-gray-50 border-t space-y-4">
+                {/* Cuadre Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Total Ingresos */}
+                  <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
+                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-0.5">Total Ingresos a Caja</p>
+                    <p className="text-xl font-black text-green-600">${reportStats.totalSales.toLocaleString()}</p>
+                    <div className="text-[11px] text-gray-500 mt-1 space-y-0.5 border-t pt-1">
+                      <p className="flex justify-between"><span>Ventas Contado:</span> <span className="font-bold text-gray-800">${reportStats.totalDirectSales.toLocaleString()}</span></p>
+                      {reportStats.totalCreditPayments > 0 && (
+                        <p className="flex justify-between text-blue-600"><span>Recaudo Créditos:</span> <span className="font-bold">${reportStats.totalCreditPayments.toLocaleString()}</span></p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Arqueo Efectivo Físico */}
+                  <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
+                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-0.5">Efectivo en Cajón (Arqueo)</p>
+                    <p className="text-xl font-black text-gray-800">${reportStats.cashInDrawerExpected.toLocaleString()}</p>
+                    <div className="text-[11px] text-gray-500 mt-1 space-y-0.5 border-t pt-1">
+                      <p className="flex justify-between"><span>Efectivo recibido:</span> <span className="font-bold text-gray-800">${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span></p>
+                      <p className="flex justify-between text-red-600"><span>Menos Gastos:</span> <span className="font-bold">-${reportStats.totalExpenses.toLocaleString()}</span></p>
+                    </div>
+                  </div>
+
+                  {/* Cuentas Digitales y Bancos */}
+                  <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
+                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-0.5">Bancos / Digital</p>
+                    <p className="text-xl font-black text-blue-600">${reportStats.electronicTotal.toLocaleString()}</p>
+                    <div className="text-[11px] text-gray-500 mt-1 space-y-0.5 border-t pt-1">
+                      <p className="text-gray-600 font-medium">Nequi, Daviplata, Tarj, QR</p>
+                      {reportStats.totalCredits > 0 && (
+                        <p className="flex justify-between text-amber-600"><span>Por Cobrar (Fiados):</span> <span className="font-bold">${reportStats.totalCredits.toLocaleString()}</span></p>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2">
-                  <p className="text-lg font-black text-gray-800 uppercase tracking-widest">Utilidad Neta (Caja):</p>
-                  <p className="text-3xl lg:text-4xl font-black text-blue-600">${reportStats.balance.toLocaleString()}</p>
+
+                {/* Balance Neto Bar */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-blue-50/80 p-4 rounded-xl border border-blue-200 gap-2">
+                  <div>
+                    <p className="text-sm font-black text-gray-800 uppercase tracking-wider">Balance Neto del Cuadre (Caja + Bancos):</p>
+                    <p className="text-xs text-gray-500">
+                      Total Ingresos ($${reportStats.totalSales.toLocaleString()}) - Total Gastos ($${reportStats.totalExpenses.toLocaleString()}) = Arqueo Cajón ($${reportStats.cashInDrawerExpected.toLocaleString()}) + Bancos ($${reportStats.electronicTotal.toLocaleString()})
+                    </p>
+                  </div>
+                  <p className="text-2xl lg:text-3xl font-black text-blue-600">${reportStats.balance.toLocaleString()}</p>
                 </div>
               </div>
             </motion.div>
@@ -2344,8 +3248,8 @@ export const POSView: React.FC = () => {
         {showHistoryModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="p-8 border-b flex justify-between items-center bg-gray-50">
-                <div className="flex items-center gap-4">
+              <div className="p-6 lg:p-8 border-b flex justify-between items-center bg-gray-50">
+                <div className="flex flex-wrap items-center gap-3">
                   <h3 className="text-2xl font-black text-gray-800">Historial de Ventas</h3>
                   <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
                     <Calendar className="w-4 h-4 text-blue-600" />
@@ -2356,42 +3260,181 @@ export const POSView: React.FC = () => {
                       className="text-sm font-bold text-gray-700 outline-none bg-transparent"
                     />
                   </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button 
+                      onClick={() => setHistoryDate(getTodayDate())}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-xs font-black transition",
+                        historyDate === getTodayDate() ? "bg-blue-600 text-white shadow-sm" : "bg-white border text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      Hoy
+                    </button>
+                    <button 
+                      onClick={() => setHistoryDate(getYesterdayDate())}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-xs font-black transition",
+                        historyDate === getYesterdayDate() ? "bg-blue-600 text-white shadow-sm" : "bg-white border text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      Ayer
+                    </button>
+                    <button 
+                      onClick={() => setHistoryDate(getMonthStartDate())}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-xs font-black transition",
+                        historyDate === getMonthStartDate() ? "bg-blue-600 text-white shadow-sm" : "bg-white border text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      1° del Mes
+                    </button>
+                    <button 
+                      onClick={() => setHistoryDate('todos')}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-xs font-black transition",
+                        historyDate === 'todos' ? "bg-blue-600 text-white shadow-sm" : "bg-white border text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      Todo el Historial
+                    </button>
+                  </div>
                 </div>
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
               </div>
+
+              {/* Summary Stats Bar */}
+              <div className="px-6 py-3 bg-white border-b flex flex-wrap gap-2.5 items-center text-xs">
+                <span className="font-black text-gray-400 uppercase tracking-wider text-[11px]">Resumen:</span>
+                <span className="bg-green-50 text-green-700 px-3 py-1 rounded-lg font-bold border border-green-200">
+                  Total Válidas: ${historyStats.totalValid.toLocaleString()} ({historyStats.validCount})
+                </span>
+                <span className="bg-purple-50 text-purple-700 px-3 py-1 rounded-lg font-bold border border-purple-200 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                  Nequi: ${historyStats.nequiTotal.toLocaleString()}
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-lg font-bold border border-emerald-200 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                  Efectivo: ${historyStats.efectivoTotal.toLocaleString()}
+                </span>
+                {historyStats.digitalTotal - historyStats.nequiTotal > 0 && (
+                  <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg font-bold border border-blue-200">
+                    Otros Digitales: ${(historyStats.digitalTotal - historyStats.nequiTotal).toLocaleString()}
+                  </span>
+                )}
+                {historyStats.creditPayments > 0 && (
+                  <span className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg font-bold border border-indigo-200">
+                    Recaudo Créditos: ${historyStats.creditPayments.toLocaleString()}
+                  </span>
+                )}
+                {historyStats.creditSales > 0 && (
+                  <span className="bg-amber-50 text-amber-700 px-3 py-1 rounded-lg font-bold border border-amber-200">
+                    A Crédito: ${historyStats.creditSales.toLocaleString()}
+                  </span>
+                )}
+                {historyStats.cancelledCount > 0 && (
+                  <span className="bg-red-50 text-red-600 px-3 py-1 rounded-lg font-bold border border-red-200">
+                    Anuladas: ${historyStats.totalCancelled.toLocaleString()} ({historyStats.cancelledCount})
+                  </span>
+                )}
+              </div>
+
+              {/* Method Filter Pills in History */}
+              <div className="px-6 py-2.5 bg-gray-50 border-b flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="text-[11px] font-black text-gray-400 uppercase mr-1">Filtrar por Método:</span>
+                {[
+                  { id: 'todos', label: 'Todas' },
+                  { id: 'Nequi', label: 'Solo Nequi' },
+                  { id: 'Efectivo', label: 'Solo Efectivo' },
+                  { id: 'Daviplata', label: 'Daviplata' },
+                  { id: 'Tarjeta', label: 'Tarjeta' },
+                  { id: 'Crédito', label: 'A Crédito' }
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => setHistoryMethodFilter(f.id)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg text-xs font-black transition",
+                      historyMethodFilter === f.id
+                        ? (f.id === 'Nequi' 
+                            ? "bg-purple-600 text-white shadow-sm" 
+                            : f.id === 'Efectivo' 
+                              ? "bg-green-600 text-white shadow-sm" 
+                              : "bg-gray-900 text-white shadow-sm")
+                        : "bg-white border text-gray-600 hover:bg-gray-100"
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="flex-1 overflow-y-auto p-4 lg:p-8">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left min-w-[600px]">
-                    <thead><tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b"><th className="pb-4">Fecha</th><th className="pb-4">Mesa</th><th className="pb-4">Cliente</th><th className="pb-4">Método</th><th className="pb-4 text-right">Total</th><th className="pb-4 text-right">Acción</th></tr></thead>
-                  <tbody className="divide-y">
-                    {historyData.map(sale => (
-                      <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
-                        <td className="py-4 text-sm font-bold">{sale.timestamp?.toDate().toLocaleString()}</td>
-                        <td className="py-4 text-sm font-black">{sale.table}</td>
-                        <td className="py-4 text-sm font-medium">{sale.clientName}</td>
-                        <td className="py-4 text-xs font-black uppercase text-gray-500">{sale.paymentMethod}</td>
-                        <td className="py-4 text-right font-black text-gray-900">${sale.total.toLocaleString()}</td>
-                        <td className="py-4 text-right">
-                          <div className="flex justify-end gap-1">
-                            <button onClick={() => viewSale(sale)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Ver Tiquet">
-                              <FileText className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => printSale(sale)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition" title="Imprimir Tiquet">
-                              <Printer className="w-4 h-4" />
-                            </button>
-                            {sale.status !== 'cancelled' && (
-                              <button onClick={() => deleteSale(sale.id)} className="p-2 text-gray-300 hover:text-red-600 transition" title="Anular Venta">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
+                    <thead>
+                      <tr className="text-xs font-black text-gray-400 uppercase tracking-widest border-b">
+                        <th className="pb-4">Fecha / Hora</th>
+                        <th className="pb-4">Mesa</th>
+                        <th className="pb-4">Cliente</th>
+                        <th className="pb-4">Método</th>
+                        <th className="pb-4 text-right">Total</th>
+                        <th className="pb-4 text-right">Acción</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y">
+                      {historyData
+                        .filter(sale => saleMatchesMethod(sale, historyMethodFilter))
+                        .map(sale => (
+                          <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
+                            <td className="py-4 text-sm font-bold">
+                              {sale.timestamp?.toDate ? sale.timestamp.toDate().toLocaleString('es-CO') : new Date(sale.timestamp).toLocaleString('es-CO')}
+                            </td>
+                            <td className="py-4 text-sm font-black">{sale.table}</td>
+                            <td className="py-4 text-sm font-medium">{sale.clientName}</td>
+                            <td className="py-4">{renderPaymentBadge(sale.paymentMethod)}</td>
+                            <td className="py-4 text-right font-black text-gray-900">${(Number(sale.total) || 0).toLocaleString()}</td>
+                            <td className="py-4 text-right">
+                              <div className="flex justify-end gap-1">
+                                <button onClick={() => viewSale(sale)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Ver Tiquet">
+                                  <FileText className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => printSale(sale)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition" title="Imprimir Tiquet">
+                                  <Printer className="w-4 h-4" />
+                                </button>
+                                {sale.status !== 'cancelled' && (
+                                  <button onClick={() => deleteSale(sale.id)} className="p-2 text-gray-300 hover:text-red-600 transition" title="Anular Venta">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      {historyData.filter(sale => saleMatchesMethod(sale, historyMethodFilter)).length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="py-12 text-center text-gray-400 italic">No hay ventas registradas con este filtro en esta fecha</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    {historyData.filter(s => s.status !== 'cancelled').length > 0 && (
+                      <tfoot className="bg-gray-50 border-t font-black text-sm">
+                        <tr>
+                          <td colSpan={4} className="py-4 px-2 text-gray-800">
+                            {historyMethodFilter === 'todos' ? 'TOTAL VENTAS VÁLIDAS:' : `SUBTOTAL ${historyMethodFilter.toUpperCase()}:`}
+                          </td>
+                          <td className="py-4 text-right text-green-600">
+                            ${historyData
+                              .filter(sale => sale.status !== 'cancelled' && saleMatchesMethod(sale, historyMethodFilter))
+                              .reduce((sum, s) => sum + (historyMethodFilter === 'todos' ? (Number(s.total) || 0) : getMethodAmountFromSale(s, historyMethodFilter)), 0)
+                              .toLocaleString()}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
               </div>
-            </div>
             </motion.div>
           </div>
         )}
@@ -2409,16 +3452,39 @@ export const POSView: React.FC = () => {
                 const fd = new FormData(e.currentTarget); 
                 setIsProcessing(true);
                 try {
-                  await addDoc(collection(db, 'expenses'), { 
-                    concept: fd.get('concept'), 
-                    category: fd.get('category'), 
-                    amount: Number(fd.get('amount')), 
-                    timestamp: serverTimestamp() 
-                  }); 
+                  const concept = String(fd.get('concept') || 'Gasto');
+                  const category = String(fd.get('category') || 'Insumos');
+                  const amount = Number(fd.get('amount')) || 0;
+                  const localExpId = `exp_${Date.now()}`;
+                  const newExpense: Expense = {
+                    id: localExpId,
+                    concept,
+                    category,
+                    amount,
+                    timestamp: new Date().toISOString()
+                  };
+
+                  saveLocalExpense(newExpense);
+                  setReportData(prev => ({
+                    ...prev,
+                    expenses: [newExpense, ...prev.expenses]
+                  }));
+
+                  try {
+                    await addDoc(collection(db, 'expenses'), { 
+                      concept, 
+                      category, 
+                      amount, 
+                      timestamp: serverTimestamp() 
+                    });
+                  } catch (expErr) {
+                    console.warn('Gasto guardado en almacenamiento local seguro:', expErr);
+                  }
+
                   setShowExpensesModal(false); 
                   Swal.fire({ icon: 'success', title: 'Gasto Registrado', timer: 1500, showConfirmButton: false }); 
                 } catch (error) {
-                  handleFirestoreError(error, OperationType.WRITE, 'expenses');
+                  console.error('Error registrando gasto:', error);
                 } finally {
                   setIsProcessing(false);
                 }

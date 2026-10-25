@@ -43,7 +43,7 @@ export interface Sale {
   timestamp: any;
   clientName: string;
   table: string;
-  status?: 'cancelled';
+  status?: 'active' | 'cancelled';
   isCreditPayment?: boolean;
 }
 

@@ -169,28 +169,6 @@ const Navigation: React.FC<{ user: User | null, userProfile: any, isOpen: boolea
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [authReady, setAuthReady] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        await ensureUserProfile(u);
-      }
-      setAuthReady(true);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  if (!authReady) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-600"></div>
-      </div>
-    );
-  }
-
   return (
     <CartProvider>
       <BrowserRouter>
@@ -212,20 +190,31 @@ function AppContent() {
   const isAdminView = ['/pos', '/inventory', '/users', '/admin'].includes(location.pathname);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+    // Safety timeout so the preview canvas is never stuck in loading
+    const timer = setTimeout(() => {
+      setAuthReady(true);
+    }, 700);
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      clearTimeout(timer);
       setUser(u);
       if (u) {
-        await ensureUserProfile(u);
+        // Run profile sync in background without blocking UI rendering
+        ensureUserProfile(u).catch(console.error);
       }
       setAuthReady(true);
     });
-    return () => unsubscribe();
+
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   if (!authReady) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-600"></div>
+        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-red-600"></div>
       </div>
     );
   }
