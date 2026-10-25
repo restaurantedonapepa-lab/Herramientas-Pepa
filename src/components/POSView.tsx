@@ -3300,6 +3300,16 @@ export const POSView: React.FC = () => {
                   </div>
                 </div>
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
+                <button 
+                  onClick={async () => {
+                    const { diagnoseSales } = await import('../utils/diagnoseSales');
+                    const broken = await diagnoseSales();
+                    alert(`Diagnóstico completado. Se encontraron ${broken.length} registros con fecha inválida. Revisa la consola para más detalles.`);
+                  }}
+                  className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-red-200 transition"
+                >
+                  Diagnosticar BD
+                </button>
               </div>
 
               {/* Summary Stats Bar */}
@@ -3387,7 +3397,11 @@ export const POSView: React.FC = () => {
                         .map(sale => (
                           <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
                             <td className="py-4 text-sm font-bold">
-                              {sale.timestamp?.toDate ? sale.timestamp.toDate().toLocaleString('es-CO') : new Date(sale.timestamp).toLocaleString('es-CO')}
+                              {(() => {
+                                const d = sale.timestamp?.toDate ? sale.timestamp.toDate() : new Date(sale.timestamp);
+                                const isValid = d instanceof Date && !isNaN(d.getTime());
+                                return isValid ? d.toLocaleString('es-CO') : 'Fecha no válida';
+                              })()}
                             </td>
                             <td className="py-4 text-sm font-black">{sale.table}</td>
                             <td className="py-4 text-sm font-medium">{sale.clientName}</td>
