@@ -1,0 +1,202 @@
+Reporte de Diagnóstico de Ventas
+
+ID: 2XFZ0wT3Wv1kt2n0Qh1g
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793041782,"nanoseconds":151000000}
+-------------------
+ID: MzYg7hnVhADBkZKr2KwW
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793041726,"nanoseconds":897000000}
+-------------------
+ID: IHBUG4dUsan9PC7GsGCj
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793041577,"nanoseconds":378000000}
+-------------------
+ID: 49NLwLtZLiRdmLOF4ewz
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793040819,"nanoseconds":392000000}
+-------------------
+ID: ZJQNhcRnohUZdmZsm1wu
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793040800,"nanoseconds":224000000}
+-------------------
+ID: qW4rAqDDtqgFiBqlJMLO
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793040709,"nanoseconds":428000000}
+-------------------
+ID: TOw5zgAWtQOkkBcuBypo
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793040629,"nanoseconds":584000000}
+-------------------
+ID: pK2St8y2umtwbVpet1ne
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793040538,"nanoseconds":53000000}
+-------------------
+ID: RvprPpsH9lk3rNx12ERV
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793040280,"nanoseconds":785000000}
+-------------------
+ID: q8GNoDOPYdrsdDK1QKjp
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793039769,"nanoseconds":946000000}
+-------------------
+ID: ka2wfcnvmpR9CCgrHl9c
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793039550,"nanoseconds":903000000}
+-------------------
+ID: rUY7fkQzdf7qrXieFHc4
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793038797,"nanoseconds":998000000}
+-------------------
+ID: nNJn4cQwVPq6Q6L5xnmG
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793038466,"nanoseconds":200000000}
+-------------------
+ID: hSeDcKSr24AWpyQ2alwo
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793038240,"nanoseconds":64000000}
+-------------------
+ID: aH52s0y566wiL31EKkPU
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793038123,"nanoseconds":735000000}
+-------------------
+ID: xIpwn7Vn4wEodtGhmyjg
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793037682,"nanoseconds":338000000}
+-------------------
+ID: hofz8kVVfS2ienUPv7Wj
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793037435,"nanoseconds":277000000}
+-------------------
+ID: Tr3LkbVfy39Z9mszpyXf
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793037082,"nanoseconds":181000000}
+-------------------
+ID: pofKsjhnI33kjV3brTek
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036682,"nanoseconds":474000000}
+-------------------
+ID: kf0HFqroYFHIUcpv8FqA
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036533,"nanoseconds":641000000}
+-------------------
+ID: tu6nYnzWAm46vW39leB4
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036295,"nanoseconds":10000000}
+-------------------
+ID: quOcSuXWatJe20Vnj81E
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036265,"nanoseconds":513000000}
+-------------------
+ID: YvUxYnHmiZUOui23ZvWC
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036219,"nanoseconds":832000000}
+-------------------
+ID: ScuDL5fCercAnRmHg5Fj
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036193,"nanoseconds":998000000}
+-------------------
+ID: fdTcTnfG2QaGX6MbvL2M
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036166,"nanoseconds":915000000}
+-------------------
+ID: MtQ5OSozmw5Qb9Nlzb29
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793036122,"nanoseconds":633000000}
+-------------------
+ID: 94mHOJWuceOss8KgLP8u
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793035831,"nanoseconds":347000000}
+-------------------
+ID: 1WSeB8nl3tTIRiOw3HGh
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793035448,"nanoseconds":524000000}
+-------------------
+ID: EH4TZc0m3hSB2OU4klA0
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793035315,"nanoseconds":334000000}
+-------------------
+ID: lbm3AmVNN0JLu4ws9dPU
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793035311,"nanoseconds":723000000}
+-------------------
+ID: A9KpHWd6RLDfiwCq4Smf
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793034787,"nanoseconds":253000000}
+-------------------
+ID: 0IC7UnK9m3KJ3Ytrggeq
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793034706,"nanoseconds":313000000}
+-------------------
+ID: vPdesnvEMNrT4483AGm0
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793034097,"nanoseconds":503000000}
+-------------------
+ID: q7c7bRxz5jNZi1LnLDWT
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793032750,"nanoseconds":735000000}
+-------------------
+ID: Itw7KIJ4kbmfakwKiG9p
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793031088,"nanoseconds":854000000}
+-------------------
+ID: nnie0iuUu5e2d2f6k6fe
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793028154,"nanoseconds":631000000}
+-------------------
+ID: pQ3MTikV3NZVSKAftheZ
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793026314,"nanoseconds":470000000}
+-------------------
+ID: 44RqBh9Bk5UtjvwYW3Ex
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1793017209,"nanoseconds":711000000}
+-------------------
+ID: ZPkNoz4wox2tFeKfeOyN
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792969762,"nanoseconds":590000000}
+-------------------
+ID: 6E5ZgcVDN0ZUzJcnsQ3D
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792964270,"nanoseconds":74000000}
+-------------------
+ID: EcNzHgOj4jF0EBqD71I6
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792960412,"nanoseconds":618000000}
+-------------------
+ID: 6QGnzqYxMEgohkwRqKAL
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792958999,"nanoseconds":867000000}
+-------------------
+ID: J5JO6yxUwWGDkAtsdwLV
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792958760,"nanoseconds":544000000}
+-------------------
+ID: cubw2TjQs1Q9Vo2b5mLP
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792957515,"nanoseconds":242000000}
+-------------------
+ID: xzRgFtfM2mOspovgU5LD
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792957195,"nanoseconds":886000000}
+-------------------
+ID: aiaHFyfSDTzCWF4SRFif
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792957073,"nanoseconds":45000000}
+-------------------
+ID: W7zBM1SfkjjYxmMHEgOv
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792956970,"nanoseconds":959000000}
+-------------------
+ID: iI8F31u5fOdvTMyJIegA
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792956827,"nanoseconds":393000000}
+-------------------
+ID: AbNAmo5ln4YUau3WoPZL
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792956821,"nanoseconds":112000000}
+-------------------
+ID: WA75TjGAgrYvgy6bi8CN
+Tipo timestamp: object
+Valor: {"type":"firestore/timestamp/1.0","seconds":1792956687,"nanoseconds":182000000}
+-------------------

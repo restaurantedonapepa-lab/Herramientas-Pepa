@@ -162,7 +162,14 @@ export const POSView: React.FC = () => {
 
   const getSaleDateString = (timestamp: any): string => {
     if (!timestamp) return '';
-    const d = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+    let d: Date;
+    if (timestamp?.toDate) {
+      d = timestamp.toDate();
+    } else if (timestamp?.type === 'firestore/timestamp/1.0') {
+      d = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+    } else {
+      d = new Date(timestamp);
+    }
     if (isNaN(d.getTime())) return '';
     try {
       return d.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
@@ -3302,8 +3309,8 @@ export const POSView: React.FC = () => {
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
                 <button 
                   onClick={async () => {
-                    const { inspectSales } = await import('../utils/inspectSales');
-                    await inspectSales();
+                    const { inspectSalesAndExport } = await import('../utils/inspectSales');
+                    await inspectSalesAndExport();
                     alert('Inspección completada. Revisa la consola del navegador.');
                   }}
                   className="bg-orange-100 text-orange-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-orange-200 transition"
@@ -3422,10 +3429,7 @@ export const POSView: React.FC = () => {
                           <tr key={sale.id} className={cn("hover:bg-gray-50 transition", sale.status === 'cancelled' && "opacity-50 line-through")}>
                             <td className="py-4 text-sm font-bold">
                               {(() => {
-                                if (!sale.timestamp) return 'Sin fecha';
-                                const d = sale.timestamp?.toDate ? sale.timestamp.toDate() : new Date(sale.timestamp);
-                                const isValid = d instanceof Date && !isNaN(d.getTime());
-                                return isValid ? d.toLocaleString('es-CO') : `Error (${typeof sale.timestamp})`;
+                                return getSaleDateString(sale.timestamp) || 'Fecha no válida';
                               })()}
                             </td>
                             <td className="py-4 text-sm font-black">{sale.table}</td>
