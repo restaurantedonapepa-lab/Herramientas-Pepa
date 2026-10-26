@@ -3302,6 +3302,16 @@ export const POSView: React.FC = () => {
                 <button onClick={() => setShowHistoryModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X className="w-6 h-6 text-gray-400" /></button>
                 <button 
                   onClick={async () => {
+                    const { inspectSales } = await import('../utils/inspectSales');
+                    await inspectSales();
+                    alert('Inspección completada. Revisa la consola del navegador.');
+                  }}
+                  className="bg-orange-100 text-orange-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-orange-200 transition"
+                >
+                  Inspeccionar BD
+                </button>
+                <button 
+                  onClick={async () => {
                     const { repairSales } = await import('../utils/repairSales');
                     const repaired = await repairSales();
                     if (repaired >= 0) {
