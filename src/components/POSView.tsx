@@ -1235,68 +1235,7 @@ export const POSView: React.FC = () => {
           <div style="font-size: 12px; color: #555; margin-top: 4px;">Periodo: Del ${reportRange.start} Al ${reportRange.end}</div>
         </div>
 
-        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">1. Resumen de Ingresos (Caja y Bancos)</div>
-        <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc;">
-          <span>Ventas Directas (Contado):</span> <span>$${reportStats.totalDirectSales.toLocaleString()}</span>
-        </div>
-        ${reportStats.totalCreditPayments > 0 ? `
-          <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; color: #2563eb;">
-            <span>Recaudo de Créditos (Cartera Cobrada):</span> <span>$${reportStats.totalCreditPayments.toLocaleString()}</span>
-          </div>
-        ` : ''}
-        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 2px solid #111; font-weight: bold; font-size: 14px; background: #f9fafb;">
-          <span>TOTAL INGRESOS A CAJA:</span> <span>$${reportStats.totalSales.toLocaleString()}</span>
-        </div>
-
-        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">2. Desglose por Método de Pago Recibido</div>
-        <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
-          <span>Efectivo:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc; font-weight: bold; color: #7c3aed; background: #faf5ff;">
-          <span>NEQUI (Digital / Bancos):</span> <span>$${(reportStats.salesByMethod['Nequi'] || 0).toLocaleString()}</span>
-        </div>
-        ${(reportStats.salesByMethod['Daviplata'] || 0) > 0 ? `
-          <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
-            <span>Daviplata:</span> <span>$${(reportStats.salesByMethod['Daviplata'] || 0).toLocaleString()}</span>
-          </div>
-        ` : ''}
-        ${(reportStats.salesByMethod['Tarjeta'] || 0) > 0 ? `
-          <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
-            <span>Tarjeta:</span> <span>$${(reportStats.salesByMethod['Tarjeta'] || 0).toLocaleString()}</span>
-          </div>
-        ` : ''}
-        ${(reportStats.salesByMethod['QR'] || 0) > 0 ? `
-          <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
-            <span>QR:</span> <span>$${(reportStats.salesByMethod['QR'] || 0).toLocaleString()}</span>
-          </div>
-        ` : ''}
-        ${Object.entries(reportStats.salesByMethod)
-          .filter(([m, val]) => !['Efectivo', 'Nequi', 'Daviplata', 'Tarjeta', 'QR'].includes(m) && val > 0)
-          .map(([m, val]) => `
-            <div style="display: flex; justify-content: space-between; padding: 4px 10px; border-bottom: 1px dotted #ccc;">
-              <span>${m}:</span> <span>$${val.toLocaleString()}</span>
-            </div>
-          `).join('')}
-        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 2px solid #111; font-weight: bold; font-size: 13px; background: #f9fafb;">
-          <span>SUMA DE MÉTODOS DE CAJA:</span> <span>$${reportStats.totalSales.toLocaleString()}</span>
-        </div>
-
-        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">3. Arqueo de Efectivo Físico vs Bancos</div>
-        <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc;">
-          <span>Efectivo Total Recibido:</span> <span>$${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px dotted #ccc; color: #dc2626;">
-          <span>(-) Gastos de Operación:</span> <span>-$${reportStats.totalExpenses.toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #111; font-weight: bold; color: #15803d; background: #f0fdf4;">
-          <span>(=) EFECTIVO ESPERADO EN CAJÓN FÍSICO:</span> <span>$${reportStats.cashInDrawerExpected.toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 2px solid #111; font-weight: bold; color: #7c3aed; background: #faf5ff; margin-top: 4px;">
-          <span>(+) TOTAL EN BANCOS/DIGITAL (Nequi/Daviplata/Tarj/QR):</span> <span>$${reportStats.electronicTotal.toLocaleString()}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 8px 10px; font-weight: bold; font-size: 15px; background: #f3f4f6; margin-top: 6px;">
-          <span>BALANCE NETO TOTAL (Caja + Bancos):</span> <span style="color: #2563eb;">$${reportStats.balance.toLocaleString()}</span>
-        </div>
+        <div style="font-size: 13px; font-weight: bold; background: #f3f4f6; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #111; text-transform: uppercase;">Detalle de Ventas</div>
 
         ${reportStats.totalCredits > 0 ? `
           <div style="font-size: 13px; font-weight: bold; background: #fef3c7; color: #92400e; padding: 6px 10px; margin-top: 15px; border-bottom: 2px solid #f59e0b; text-transform: uppercase;">4. Créditos Otorgados (Cuentas por Cobrar - No entraron a caja)</div>
@@ -2597,116 +2536,69 @@ export const POSView: React.FC = () => {
 
         {showReportsModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col border border-gray-200">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="bg-white w-full h-full lg:rounded-2xl shadow-2xl lg:max-w-5xl lg:max-h-[95vh] overflow-y-auto flex flex-col lg:border border-gray-200">
               {/* Header */}
-              <div className="px-6 py-4 border-b flex justify-between items-center bg-white">
-                <div className="flex items-center gap-3">
-                  <ChartLine className="w-6 h-6 text-blue-600" />
+              <div className="px-4 py-3 border-b flex items-center justify-between bg-white z-20">
+                <div className="flex items-center gap-2">
+                  <ChartLine className="w-5 h-5 text-blue-600" />
                   <div>
-                    <h3 className="text-xl font-black text-gray-800">Cuadre Diario y Reportes</h3>
-                    <p className="text-xs text-gray-400 font-medium">Contabilidad y Arqueo de Caja</p>
+                    <h3 className="text-sm font-black text-gray-800 leading-tight">Cuadre Diario</h3>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={printConsumptionReport} className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-600 rounded-lg text-xs font-bold border border-purple-100 hover:bg-purple-100 transition shadow-sm">
-                    <LayoutGrid className="w-4 h-4" />
-                    Platos
+                <div className="flex items-center gap-1">
+                  <button onClick={printConsumptionReport} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition">
+                    <LayoutGrid className="w-5 h-5" />
                   </button>
-                  <button onClick={printCashReport} className="flex items-center gap-2 px-3.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition shadow-sm">
-                    <Printer className="w-4 h-4" />
-                    Imprimir Cuadre
+                  <button onClick={printCashReport} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition">
+                    <Printer className="w-5 h-5" />
                   </button>
-                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition ml-1">
-                    <X className="w-6 h-6 text-gray-400" />
+                  <button onClick={() => setShowReportsModal(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+                    <X className="w-5 h-5 text-gray-500" />
                   </button>
                 </div>
               </div>
 
               {/* Date Filters & Quick Presets */}
-              <div className="px-6 py-3.5 bg-gray-50 border-b flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="px-4 py-3 bg-gray-50 border-b space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-gray-400 uppercase">Rango:</span>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="date" 
-                      className="p-2 bg-white border rounded-lg font-bold text-gray-700 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" 
-                      value={reportRange.start} 
-                      onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} 
-                    />
-                    <span className="text-gray-400 font-bold">-</span>
-                    <input 
-                      type="date" 
-                      className="p-2 bg-white border rounded-lg font-bold text-gray-700 text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" 
-                      value={reportRange.end} 
-                      onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} 
-                    />
-                  </div>
-                  <button 
-                    onClick={fetchReportData} 
-                    className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow-sm ml-1" 
-                    title="Actualizar / Consultar"
-                  >
+                  <input 
+                    type="date" 
+                    className="p-1.5 flex-1 bg-white border rounded-lg font-bold text-gray-700 text-[11px] outline-none shadow-sm" 
+                    value={reportRange.start} 
+                    onChange={(e) => setReportRange(p => ({ ...p, start: e.target.value }))} 
+                  />
+                  <span className="text-gray-400 font-bold text-[10px]">a</span>
+                  <input 
+                    type="date" 
+                    className="p-1.5 flex-1 bg-white border rounded-lg font-bold text-gray-700 text-[11px] outline-none shadow-sm" 
+                    value={reportRange.end} 
+                    onChange={(e) => setReportRange(p => ({ ...p, end: e.target.value }))} 
+                  />
+                  <button onClick={fetchReportData} className="p-1.5 bg-blue-600 text-white rounded-lg shadow-sm">
                     <Search className="w-4 h-4" />
                   </button>
                 </div>
-
-                {/* Quick Presets */}
-                <div className="flex flex-wrap items-center gap-1.5 self-end md:self-auto">
-                  <button 
-                    onClick={() => setReportRange({ start: getTodayDate(), end: getTodayDate() })}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
-                      reportRange.start === getTodayDate() && reportRange.end === getTodayDate()
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "bg-white border text-gray-600 hover:bg-gray-100"
-                    )}
-                  >
-                    Hoy
-                  </button>
-                  <button 
-                    onClick={() => setReportRange({ start: getYesterdayDate(), end: getYesterdayDate() })}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
-                      reportRange.start === getYesterdayDate() && reportRange.end === getYesterdayDate()
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "bg-white border text-gray-600 hover:bg-gray-100"
-                    )}
-                  >
-                    Ayer
-                  </button>
-                  <button 
-                    onClick={() => setReportRange({ start: getMonthStartDate(), end: getTodayDate() })}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
-                      reportRange.start === getMonthStartDate() && reportRange.end === getTodayDate()
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "bg-white border text-gray-600 hover:bg-gray-100"
-                    )}
-                  >
-                    Este Mes
-                  </button>
-                  <button 
-                    onClick={() => setReportRange({ start: '2026-01-01', end: getTodayDate() })}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
-                      reportRange.start === '2026-01-01' && reportRange.end === getTodayDate()
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "bg-white border text-gray-600 hover:bg-gray-100"
-                    )}
-                  >
-                    Todo 2026
-                  </button>
-                  <button 
-                    onClick={() => setReportRange({ start: '2025-01-01', end: '2027-12-31' })}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-black transition",
-                      reportRange.start === '2025-01-01' && reportRange.end === '2027-12-31'
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "bg-white border text-gray-600 hover:bg-gray-100"
-                    )}
-                  >
-                    Todo el Historial
-                  </button>
+                <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                  {[
+                    { label: 'Hoy', start: getTodayDate(), end: getTodayDate() },
+                    { label: 'Ayer', start: getYesterdayDate(), end: getYesterdayDate() },
+                    { label: 'Mes', start: getMonthStartDate(), end: getTodayDate() },
+                    { label: '2026', start: '2026-01-01', end: getTodayDate() },
+                    { label: 'Todo', start: '2025-01-01', end: '2027-12-31' }
+                  ].map(p => (
+                    <button 
+                      key={p.label}
+                      onClick={() => setReportRange({ start: p.start, end: p.end })}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition",
+                        reportRange.start === p.start && reportRange.end === p.end
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "bg-white border text-gray-600 hover:bg-gray-100"
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -3200,42 +3092,7 @@ export const POSView: React.FC = () => {
 
               {/* Footer Cuadre Diario */}
               <div className="px-6 lg:px-8 py-5 bg-gray-50 border-t space-y-4">
-                {/* Cuadre Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {/* Total Ingresos */}
-                  <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-0.5">Total Ingresos a Caja</p>
-                    <p className="text-xl font-black text-green-600">${reportStats.totalSales.toLocaleString()}</p>
-                    <div className="text-[11px] text-gray-500 mt-1 space-y-0.5 border-t pt-1">
-                      <p className="flex justify-between"><span>Ventas Contado:</span> <span className="font-bold text-gray-800">${reportStats.totalDirectSales.toLocaleString()}</span></p>
-                      {reportStats.totalCreditPayments > 0 && (
-                        <p className="flex justify-between text-blue-600"><span>Recaudo Créditos:</span> <span className="font-bold">${reportStats.totalCreditPayments.toLocaleString()}</span></p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Arqueo Efectivo Físico */}
-                  <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-0.5">Efectivo en Cajón (Arqueo)</p>
-                    <p className="text-xl font-black text-gray-800">${reportStats.cashInDrawerExpected.toLocaleString()}</p>
-                    <div className="text-[11px] text-gray-500 mt-1 space-y-0.5 border-t pt-1">
-                      <p className="flex justify-between"><span>Efectivo recibido:</span> <span className="font-bold text-gray-800">${(reportStats.salesByMethod['Efectivo'] || 0).toLocaleString()}</span></p>
-                      <p className="flex justify-between text-red-600"><span>Menos Gastos:</span> <span className="font-bold">-${reportStats.totalExpenses.toLocaleString()}</span></p>
-                    </div>
-                  </div>
-
-                  {/* Cuentas Digitales y Bancos */}
-                  <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm">
-                    <p className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-0.5">Bancos / Digital</p>
-                    <p className="text-xl font-black text-blue-600">${reportStats.electronicTotal.toLocaleString()}</p>
-                    <div className="text-[11px] text-gray-500 mt-1 space-y-0.5 border-t pt-1">
-                      <p className="text-gray-600 font-medium">Nequi, Daviplata, Tarj, QR</p>
-                      {reportStats.totalCredits > 0 && (
-                        <p className="flex justify-between text-amber-600"><span>Por Cobrar (Fiados):</span> <span className="font-bold">${reportStats.totalCredits.toLocaleString()}</span></p>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {/* Cuadre Cards (Eliminadas) */}
 
                 {/* Balance Neto Bar */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-blue-50/80 p-4 rounded-xl border border-blue-200 gap-2">
